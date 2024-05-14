@@ -111,7 +111,7 @@ pub(crate) async fn delete_borrow(
     Ok(())
 }
 
-pub(crate) async fn update_borrow_item(pool: &SqlitePool, borrow_id: i64, item_id: i32) -> anyhow::Result<()> {
+pub(crate) async fn update_borrow_item(pool: &SqlitePool, borrow_id: i32, item_id: i64) -> anyhow::Result<()> {
     let mut connection = pool.acquire().await?;
     sqlx::query!(
         "UPDATE borrow SET item_id = ? WHERE ordering = ?",

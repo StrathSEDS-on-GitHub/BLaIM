@@ -136,7 +136,7 @@ async fn handle_edits(
                 )
                 .await;
 
-                db::update_borrow_item(&ctx.data().pool, item.id, inserted_id).await?;
+                db::update_borrow_item(&ctx.data().pool, inserted_id, item.id).await?;
 
                 mci.message
                     .edit(
