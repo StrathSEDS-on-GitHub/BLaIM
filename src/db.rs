@@ -1,10 +1,11 @@
-use std::collections::VecDeque;
+use std::fmt::{self, Display};
 use std::sync::LazyLock;
+use std::{cell::RefCell, collections::VecDeque};
 
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use sqlx::SqlitePool;
+use sqlx::{Acquire, SqliteConnection, Row};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
@@ -27,8 +28,10 @@ fn fuzzy_search<'b, T>(
     scores
 }
 
-pub(crate) async fn lookup_item(pool: &SqlitePool, item: &str) -> anyhow::Result<Vec<Item>> {
-    let mut connection = pool.acquire().await?;
+pub(crate) async fn lookup_item(
+    connection: &mut SqliteConnection,
+    item: &str,
+) -> anyhow::Result<Vec<Item>> {
     let item = item.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Item,
@@ -58,8 +61,10 @@ pub(crate) async fn lookup_item(pool: &SqlitePool, item: &str) -> anyhow::Result
     Ok(exact_matches.into_iter().chain(results).collect())
 }
 
-pub(crate) async fn get_item_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Item>> {
-    let mut connection = pool.acquire().await?;
+pub(crate) async fn get_item_by_id(
+    connection: &mut SqliteConnection,
+    id: i64,
+) -> anyhow::Result<Option<Item>> {
     let item = sqlx::query_as!(Item, "SELECT id, name FROM items WHERE id = ?", id)
         .fetch_optional(&mut *connection)
         .await?;
@@ -67,10 +72,9 @@ pub(crate) async fn get_item_by_id(pool: &SqlitePool, id: i64) -> anyhow::Result
 }
 
 pub(crate) async fn get_last_holder(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     item_id: i64,
 ) -> anyhow::Result<Option<String>> {
-    let mut connection = pool.acquire().await?;
     let holder = sqlx::query!(
         "SELECT to_user FROM borrow WHERE item_id = ? ORDER BY ordering DESC LIMIT 1",
         item_id
@@ -81,52 +85,70 @@ pub(crate) async fn get_last_holder(
 }
 
 pub(crate) async fn borrow_item(
-    pool: &SqlitePool,
-    item_id: i64,
+    connection: &mut SqliteConnection,
+    item: &Item,
     user: &str,
-) -> anyhow::Result<i32> {
-    let mut connection = pool.acquire().await?;
+) -> anyhow::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
     let now = sqlx::types::chrono::Utc::now();
-    let id = sqlx::query!(
-        "INSERT INTO borrow (item_id, to_user, time) VALUES (?, ?, ?); SELECT last_insert_rowid() as id;",
-        item_id,
-        user,
-        now,
-    )
-    .fetch_one(&mut *connection)
-    .await?;
-    Ok(id.id)
-}
-
-pub(crate) async fn delete_borrow(pool: &SqlitePool, borrow_id: i32) -> anyhow::Result<()> {
-    let mut connection = pool.acquire().await?;
-    sqlx::query!("DELETE FROM borrow WHERE ordering = ?", borrow_id,)
+    let items = box_contents(connection, item).await?;
+    for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
+        sqlx::query!(
+            "INSERT INTO borrow (item_id, to_user, time) VALUES (?, ?, ?);",
+            node.item.id,
+            user,
+            now,
+        )
         .execute(&mut *connection)
         .await?;
-    Ok(())
-}
+    }
 
-pub(crate) async fn update_borrow_item(
-    pool: &SqlitePool,
-    borrow_id: i32,
-    item_id: i64,
-) -> anyhow::Result<()> {
-    let mut connection = pool.acquire().await?;
-    sqlx::query!(
-        "UPDATE borrow SET item_id = ? WHERE ordering = ?",
-        item_id,
-        borrow_id,
-    )
-    .execute(&mut *connection)
-    .await?;
-    Ok(())
+    let mut present_updates = Vec::new();
+    let owned_items = get_items_by_owner(connection, user)
+        .await?
+        .iter()
+        .map(|i| i.id)
+        .collect::<Vec<_>>();
+    for (_, node, _) in items.iter_depth_first() {
+        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent IN (");
+        let mut sep = builder.separated(",");
+        owned_items.iter().for_each(|it| { sep.push_bind(it); });
+        builder.push(")) WHERE child = ").push_bind(node.item.id).push(" AND present != (parent IN (");
+        let mut sep = builder.separated(",");
+        owned_items.iter().for_each(|it| { sep.push_bind(it); });
+        builder.push(")) RETURNING parent, present;");
+
+        let mut query = builder.build();
+
+        for i in owned_items.iter() {
+            query = query.bind(i);
+        }
+        for i in owned_items.iter() {
+            query = query.bind(i);
+        }
+
+        let result = query
+            .fetch_optional(&mut *connection)
+            .await?;
+
+        if let Some(row) = result {
+            let parent: i64 = row.get(0);
+            let box_item = get_item_by_id(connection, parent).await?.unwrap();
+            let present = row.get(1);
+            present_updates.push((box_item, node.item.clone(), present));
+        }
+    }
+
+    let update_tree: ItemTree = items
+        .into_iter_depth_first()
+        .filter(|(_, node, _)| node.present)
+        .collect();
+    Ok((update_tree, present_updates))
 }
 
 pub(crate) async fn borrow_history(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     item_id: i64,
 ) -> anyhow::Result<Vec<(String, DateTime<Utc>)>> {
-    let mut connection = pool.acquire().await?;
     let history = sqlx::query!(
         "SELECT to_user, time FROM borrow WHERE item_id = ? ORDER BY ordering DESC",
         item_id
@@ -145,11 +167,10 @@ pub(crate) async fn borrow_history(
 }
 
 pub(crate) async fn register_item(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     strid: &str,
     name: &str,
 ) -> anyhow::Result<()> {
-    let mut connection = pool.acquire().await?;
     sqlx::query!(
         "INSERT INTO items (strid, name) VALUES (?, ?);",
         strid,
@@ -161,7 +182,7 @@ pub(crate) async fn register_item(
 }
 
 pub(crate) async fn get_items_by_owner(
-    pool: &SqlitePool,
+    pool: &mut SqliteConnection,
     owner: &str,
 ) -> anyhow::Result<Vec<Item>> {
     let mut connection = pool.acquire().await?;
@@ -211,7 +232,7 @@ impl std::fmt::Display for BoxingError {
             } => write!(
                 f,
                 "Non-euclidean boxes not yet supported. '{}' was previously in box '{}', but will now be a parent of '{}'.",
-                item.name, prior_parent.name, item.name
+                item.name, prior_parent.name, prior_parent.name
             ),
             Self::AlreadyBoxed { item, prior_box } => {
                 write!(f, "'{}' is already in box {}.", item.name, prior_box.name)
@@ -239,14 +260,13 @@ impl std::error::Error for BoxingError {
 }
 
 pub(crate) async fn box_all(
-    pool: &SqlitePool,
+    connection: &mut SqliteConnection,
     owner: &str,
     r#box: &Item,
     items: &[Item],
 ) -> Result<(), BoxingError> {
-    let mut connection = pool.acquire().await?;
     for item in items {
-        let contents = box_contents(pool, item).await?;
+        let contents = box_contents(connection, item).await?;
         if contents.find(r#box.id).is_some() {
             return Err(BoxingError::AlreadyBoxed {
                 item: item.clone(),
@@ -269,7 +289,7 @@ pub(crate) async fn box_all(
         }
     }
 
-    let owned_items = get_items_by_owner(pool, owner).await?;
+    let owned_items = get_items_by_owner(connection, owner).await?;
     for item in items {
         let owned = owned_items.iter().any(|i| i.id == item.id);
         sqlx::query!(
@@ -327,7 +347,7 @@ impl ItemTree {
         None
     }
 
-    pub fn iter_depth_first(&self) -> impl Iterator<Item = (usize, &ItemTree, bool)> {
+    pub fn iter_depth_first(&self) -> impl Iterator<Item = (usize, &ItemTreeNode, bool)> {
         let mut stack = vec![(0, self, true)];
         std::iter::from_fn(move || {
             if let Some((depth, tree, s)) = stack.pop() {
@@ -338,7 +358,25 @@ impl ItemTree {
                     });
                 }
 
-                Some((depth, tree, s))
+                Some((depth, &tree.item, s))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn into_iter_depth_first(self) -> impl Iterator<Item = (usize, ItemTreeNode, bool)> {
+        let mut stack = vec![(0, self, true)];
+        std::iter::from_fn(move || {
+            if let Some((depth, tree, s)) = stack.pop() {
+                if let Some((last, most)) = tree.children.split_last() {
+                    stack.push((depth + 1, last.clone(), true));
+                    most.iter().rev().for_each(|child| {
+                        stack.push((depth + 1, child.clone(), false));
+                    });
+                }
+
+                Some((depth, tree.item, s))
             } else {
                 None
             }
@@ -346,8 +384,58 @@ impl ItemTree {
     }
 }
 
-pub(crate) async fn box_contents(pool: &SqlitePool, r#box: &Item) -> anyhow::Result<ItemTree> {
-    let mut connection = pool.acquire().await?;
+impl Display for ItemTree {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "```")?;
+        self.iter_depth_first()
+            .try_for_each(|(depth, it, last_child)| {
+                let prefix_size = depth * 4;
+                let tree_icon = if depth == 0 {
+                    "  "
+                } else if last_child {
+                    "└─"
+                } else {
+                    "├─"
+                };
+                let present_icon = if it.present { "🟢" } else { "🔴" };
+                write!(
+                    f,
+                    "{: <prefix_size$}{tree_icon} {present_icon} {}\n",
+                    "", it.item.name
+                )
+            })?;
+        write!(f, "```")
+    }
+}
+
+impl FromIterator<(usize, ItemTreeNode, bool)> for ItemTree {
+    fn from_iter<T: IntoIterator<Item = (usize, ItemTreeNode, bool)>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+        let root_node = iter.next().unwrap().1;
+        let mut root = ItemTree::new(root_node.item, root_node.present);
+
+        let mut stack = vec![&mut root as *mut ItemTree];
+        for (depth, node, _) in iter {
+            stack.truncate(depth);
+            let tree = ItemTree::new(node.item, node.present);
+
+            unsafe {
+                let parent = stack.last_mut().unwrap();
+                let ptr = (**parent)
+                    .add_children(std::iter::once(tree))
+                    .next()
+                    .unwrap() as *mut ItemTree;
+                stack.push(ptr);
+            }
+        }
+        root
+    }
+}
+
+pub(crate) async fn box_contents(
+    connection: &mut SqliteConnection,
+    r#box: &Item,
+) -> anyhow::Result<ItemTree> {
     let mut root = ItemTree::new(r#box.clone(), true);
     let mut open_set = VecDeque::new();
     open_set.push_back(&mut root);

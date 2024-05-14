@@ -1,19 +1,24 @@
 #![feature(lazy_cell)]
+#![feature(iter_partition_in_place)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
+#![feature(closure_lifetime_binder)]
 
-use std::env;
+use std::{boxed, env};
+use std::future::Future;
+use std::pin::Pin;
 
+use db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{
     ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton,
     CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu,
     CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, User,
 };
-use serenity::futures::future::try_join_all;
+use serenity::futures::future::{join_all, try_join_all};
 use serenity::prelude::*;
 use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::SqlitePool;
+use sqlx::{Acquire, Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 mod db;
 
@@ -27,12 +32,20 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 async fn autocomplete_item<'a>(
     ctx: Context<'_>,
     partial: &'a str,
-) -> impl Iterator<Item = String> + 'a {
-    db::lookup_item(&ctx.data().pool, partial)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|item| item.name)
+) -> Box<dyn Iterator<Item = String> + Send + 'a> {
+    let conn = &mut ctx.data().pool.acquire().await;
+    if let Ok(conn) = conn {
+        let conn = conn as &mut SqliteConnection;
+        Box::new(
+            db::lookup_item(conn, partial)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item| item.name),
+        )
+    } else {
+        Box::new([].into_iter())
+    }
 }
 
 async fn make_embed(
@@ -40,6 +53,7 @@ async fn make_embed(
     from: &Option<String>,
     to: &str,
     alternatives: &[db::Item],
+    (updated_items, present_updates): &(ItemTree, Vec<(db::Item, db::Item, bool)>),
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
     let previous_owner = from
         .as_ref()
@@ -48,7 +62,7 @@ async fn make_embed(
 
     let new_owner = format!("<@{}>", to);
 
-    let embed = CreateEmbed::new()
+    let mut embed = CreateEmbed::new()
         .title(format!(
             ":white_check_mark: Borrowed item {}",
             selected.name
@@ -59,9 +73,40 @@ async fn make_embed(
         ))
         .footer(CreateEmbedFooter::new(chrono::Utc::now().to_rfc2822()));
 
-    let mut components = vec![CreateActionRow::Buttons(vec![CreateButton::new("cancel")
-        .label("Cancel")
-        .style(ButtonStyle::Danger)])];
+    let boxed_items_count = updated_items.iter_depth_first().collect::<Vec<_>>().len() - 1;
+    if boxed_items_count > 0 {
+        embed = embed.field(
+            "Boxed items",
+            format!(
+                "Transfered **{}** boxed items \n{}",
+                boxed_items_count,
+                updated_items
+            ),
+            false,
+        );
+    }
+
+    if present_updates.len() > 0 {
+        let updates = "```".to_string() + &present_updates
+            .iter()
+            .map(|(parent, item, present)| {
+                let emoji = if *present { "🟢" } else { "🔴" };
+                format!(" 🗃️ {} {} {}", parent.name, emoji, item.name)
+            })
+            .collect::<Vec<_>>()
+            .join("\n") + "```";
+
+        embed = embed.field("Box contents updates", updates, false);
+    }
+
+    let mut components = vec![CreateActionRow::Buttons(vec![
+        CreateButton::new("cancel")
+            .label("Cancel")
+            .style(ButtonStyle::Danger),
+        CreateButton::new("commit")
+            .label("Confirm")
+            .style(ButtonStyle::Primary),
+    ])];
 
     if alternatives.len() > 0 {
         components.insert(
@@ -86,13 +131,20 @@ async fn make_embed(
     (embed, components)
 }
 
-async fn handle_edits(
+async fn handle_edits<T>(
     ctx: Context<'_>,
-    embed: CreateEmbed,
-    inserted_id: i32,
-    items: &Vec<db::Item>,
+    state: T,
     handle: &ReplyHandle<'_>,
-    new_owner: &str,
+    recreate: impl for<'a> Fn(
+        &'a T,
+        &'a mut SqliteConnection,
+        i64,
+    ) -> Pin<
+        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+    >,
+    mut embed: CreateEmbed,
+    connection: &mut SqliteConnection,
+    mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
 ) -> anyhow::Result<()> {
     let message_id = handle.message().await?.id;
     let mut deleted = false;
@@ -102,16 +154,20 @@ async fn handle_edits(
         .timeout(std::time::Duration::from_secs(60))
         .channel_id(ctx.channel_id())
         .message_id(message_id)
-        .filter(|i| i.data.custom_id == "cancel" || i.data.custom_id == "replace")
+        .filter(|i| {
+            i.data.custom_id == "cancel"
+                || i.data.custom_id == "replace"
+                || i.data.custom_id == "commit"
+        })
         .await
     {
         match mci.data.custom_id.as_str() {
             "cancel" => {
-                db::delete_borrow(&ctx.data().pool, inserted_id).await?;
                 mci.message.delete(&ctx).await?;
                 mci.create_response(ctx, CreateInteractionResponse::Acknowledge)
                     .await?;
                 deleted = true;
+                break;
             }
             "replace" => {
                 let item_id = match &mci.data.kind {
@@ -122,32 +178,27 @@ async fn handle_edits(
                         .expect("Invalid value"),
                     _ => unreachable!(),
                 };
-                let item = db::get_item_by_id(&ctx.data().pool, item_id)
-                    .await?
-                    .expect("Item not found");
-                let previous_owner = db::get_last_holder(&ctx.data().pool, item.id).await?;
-                let (embed, components) = make_embed(
-                    &item,
-                    &previous_owner,
-                    new_owner,
-                    &items
-                        .clone()
-                        .into_iter()
-                        .filter(|it| it != &item)
-                        .collect::<Vec<_>>(),
-                )
-                .await;
+                transaction.rollback().await?;
+                transaction = connection.begin().await?;
 
-                db::update_borrow_item(&ctx.data().pool, inserted_id, item.id).await?;
+                let (embed_, components) = recreate(&state, &mut *transaction, item_id).await?;
+                embed = embed_;
 
                 mci.message
                     .edit(
                         ctx,
-                        EditMessage::default().embed(embed).components(components),
+                        EditMessage::default()
+                            .embed(embed.clone())
+                            .components(components),
                     )
                     .await?;
                 mci.create_response(ctx, CreateInteractionResponse::Acknowledge)
                     .await?;
+            }
+            "commit" => {
+                mci.create_response(ctx, CreateInteractionResponse::Acknowledge)
+                    .await?;
+                break;
             }
             _ => unreachable!(),
         }
@@ -160,6 +211,9 @@ async fn handle_edits(
                 CreateReply::default().embed(embed).components(Vec::new()),
             )
             .await?;
+        transaction.commit().await?;
+    } else {
+        transaction.rollback().await?;
     }
 
     Ok(())
@@ -173,10 +227,12 @@ async fn borrow(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    let items = db::lookup_item(&ctx.data().pool, &item).await?;
+    let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
+    let items = db::lookup_item(&mut *transaction, &item).await?;
 
-    let (selected, alternatives) = match items.split_first() {
-        Some((selected, alternatives)) => (selected, alternatives),
+    let selected = match items.first() {
+        Some(selected) => selected,
         None => {
             let embed = CreateEmbed::new()
                 .title("No items found")
@@ -189,7 +245,7 @@ async fn borrow(
         }
     };
 
-    let previous_owner = db::get_last_holder(&ctx.data().pool, selected.id).await?;
+    let previous_owner = db::get_last_holder(&mut *transaction, selected.id).await?;
 
     if let Some(ref owner) = previous_owner
         && owner == &ctx.author().id.to_string()
@@ -203,29 +259,63 @@ async fn borrow(
         return Ok(());
     }
 
-    let (embed, components) = make_embed(
-        selected,
-        &previous_owner,
-        &ctx.author().id.to_string(),
-        alternatives,
-    )
-    .await;
+    struct State {
+        previous_owner: Option<String>,
+        author_id: String,
+        items: Vec<db::Item>,
+    }
+
+    let task = for<'a> |state: &'a State,
+                        connection: &'a mut SqliteConnection,
+                        item_id: i64|
+             -> Pin<
+        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
+            let alternatives = state
+                .items
+                .iter()
+                .filter(|it| it.id != item_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let results = db::borrow_item(&mut *connection, selected, &state.author_id).await?;
+            let (embed, components) = make_embed(
+                &selected,
+                &state.previous_owner,
+                &state.author_id,
+                &alternatives,
+                &results,
+            )
+            .await;
+            Ok((embed, components))
+        })
+    };
+
+    let selected_id = selected.id;
+    let state = State {
+        previous_owner,
+        author_id: ctx.author().id.to_string(),
+        items,
+    };
+    let (embed, components) = task(&state, &mut *transaction, selected_id).await?;
+
     let reply = CreateReply::default()
         .embed(embed.clone())
         .components(components);
 
-    let inserted_id =
-        db::borrow_item(&ctx.data().pool, selected.id, &ctx.author().id.to_string()).await?;
-
     let handle = ctx.send(reply).await?;
+
+    let mut redo_conn = ctx.data().pool.acquire().await?;
 
     handle_edits(
         ctx,
-        embed,
-        inserted_id,
-        &items,
+        state,
         &handle,
-        &ctx.author().id.to_string(),
+        task,
+        embed,
+        &mut redo_conn,
+        transaction,
     )
     .await?;
 
@@ -240,7 +330,8 @@ async fn blame(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    let item = db::lookup_item(&ctx.data().pool, &item).await?;
+    let mut connection = ctx.data().pool.acquire().await?;
+    let item = db::lookup_item(&mut *connection, &item).await?;
     let item = match item.first() {
         Some(item) => item,
         None => {
@@ -255,7 +346,7 @@ async fn blame(
         }
     };
 
-    let history = db::borrow_history(&ctx.data().pool, item.id).await?;
+    let history = db::borrow_history(&mut *connection, item.id).await?;
     if history.is_empty() {
         let embed = CreateEmbed::new()
             .title("No history found")
@@ -310,10 +401,12 @@ async fn give(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    let items = db::lookup_item(&ctx.data().pool, &item).await?;
+    let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
+    let items = db::lookup_item(&mut *transaction, &item).await?;
 
-    let (selected, alternatives) = match items.split_first() {
-        Some((selected, alternatives)) => (selected, alternatives),
+    let selected = match items.first() {
+        Some(selected) => selected,
         None => {
             let embed = CreateEmbed::new()
                 .title("No items found")
@@ -326,7 +419,7 @@ async fn give(
         }
     };
 
-    let owner = db::get_last_holder(&ctx.data().pool, selected.id).await?;
+    let owner = db::get_last_holder(&mut *transaction, selected.id).await?;
 
     if let Some(ref owner) = owner
         && owner != &ctx.author().id.to_string()
@@ -352,23 +445,61 @@ async fn give(
         return Ok(());
     }
 
-    let inserted_id = db::borrow_item(&ctx.data().pool, selected.id, &user.id.to_string()).await?;
+    struct State {
+        previous_owner: Option<String>,
+        items: Vec<db::Item>,
+        user_id: String,
+    }
 
-    let (embed, components) =
-        make_embed(selected, &owner, &user.id.to_string(), alternatives).await;
+    let task = for<'a> |state: &'a State,
+                        connection: &'a mut SqliteConnection,
+                        item_id: i64|
+             -> Pin<
+        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
+            let alternatives = state
+                .items
+                .iter()
+                .filter(|it| it.id != item_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let results = db::borrow_item(&mut *connection, selected, &state.user_id).await?;
+            let (embed, components) = make_embed(
+                &selected,
+                &state.previous_owner,
+                &state.user_id,
+                &alternatives,
+                &results,
+            )
+            .await;
+            Ok((embed, components))
+        })
+    };
+
+    let state = State {
+        previous_owner: owner,
+        items: items.clone(),
+        user_id: user.id.to_string(),
+    };
+    let (embed, components) = task(&state, &mut *transaction, selected.id).await?;
     let reply = CreateReply::default()
         .embed(embed.clone())
         .components(components);
 
     let handle = ctx.send(reply).await?;
 
+    let mut redo_conn = ctx.data().pool.acquire().await?;
+
     handle_edits(
         ctx,
-        embed,
-        inserted_id,
-        &items,
+        state,
         &handle,
-        &user.id.to_string(),
+        task,
+        embed,
+        &mut redo_conn,
+        transaction,
     )
     .await?;
 
@@ -382,7 +513,7 @@ async fn register_item(
     #[description = "Short ID (e.g ffmini2)"] strid: String,
     #[description = "Long descriptor of the item"] name: String,
 ) -> anyhow::Result<()> {
-    db::register_item(&ctx.data().pool, &strid, &name).await?;
+    db::register_item(&mut *ctx.data().pool.acquire().await?, &strid, &name).await?;
     ctx.reply(":white_check_mark: Item registered").await?;
 
     Ok(())
@@ -404,7 +535,8 @@ pub async fn box_info(
     #[autocomplete = autocomplete_item]
     r#box: String,
 ) -> anyhow::Result<()> {
-    let item = db::lookup_item(&ctx.data().pool, &r#box).await?;
+    let mut connection = ctx.data().pool.acquire().await?;
+    let item = db::lookup_item(&mut connection, &r#box).await?;
     let item = match item.first() {
         Some(item) => item,
         None => {
@@ -419,26 +551,12 @@ pub async fn box_info(
         }
     };
 
-    let items = db::box_contents(&ctx.data().pool, item).await?;
-    let message = "```".to_owned()
-        + &items
-            .iter_depth_first()
-            .map(|(depth, it, last_child)| {
-                let prefix_size = depth * 4;
-                let tree_icon = if last_child { "└─" } else { "├─" };
-                let present_icon = if it.item.present { "🟢" } else { "🔴" };
-                format!(
-                    "{: <prefix_size$} {tree_icon} {present_icon} {}",
-                    "", it.item.item.name
-                )
-            })
-            .intersperse('\n'.to_string())
-            .collect::<String>()
-        + "```";
-
+    let items = db::box_contents(&mut connection, item).await?;
+    let message = items.to_string();
     let embed = CreateEmbed::new()
         .title(format!(":white_check_mark: Box contents for {}", item.name))
-        .description(message);
+        .description(message)
+        .footer(CreateEmbedFooter::new("🟢 = tracked within box. 🔴 = not within box."));
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -449,7 +567,10 @@ async fn lookup_item_retaining_query(
     item: String,
     pool: &SqlitePool,
 ) -> anyhow::Result<(String, Option<db::Item>)> {
-    let found = db::lookup_item(&pool, &item).await?.into_iter().nth(0);
+    let found = db::lookup_item(&mut *pool.acquire().await?, &item)
+        .await?
+        .into_iter()
+        .nth(0);
     anyhow::Ok((item, found))
 }
 
@@ -472,11 +593,12 @@ pub async fn box_add(
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
 ) -> anyhow::Result<()> {
+    let mut connection = ctx.data().pool.acquire().await?;
     let items: Vec<_> = try_join_all(
         [Some(r#box), Some(item), item2, item3, item4]
             .into_iter()
             .flatten()
-            .map(|it| lookup_item_retaining_query(it, &ctx.data().pool)),
+            .map(|it| lookup_item_retaining_query(it, &mut &ctx.data().pool)),
     )
     .await?;
 
@@ -509,12 +631,14 @@ pub async fn box_add(
     let (box_item, rest) = items.split_first().unwrap();
 
     db::box_all(
-        &ctx.data().pool,
+        &mut *connection,
         &ctx.author().id.to_string(),
         box_item,
         rest,
     )
     .await?;
+
+    ctx.reply(":white_check_mark: Items added to box").await?;
 
     Ok(())
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO borrow (item_id, to_user, time) VALUES (?, ?, ?);",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9e7950a7a41889e156db03a7f18edc411bce1f8b18278959defb4f74d9d0503a"
+}
