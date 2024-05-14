@@ -213,7 +213,7 @@ pub(crate) async fn get_items_by_owner(
 #[derive(Debug)]
 pub enum BoxingError {
     NonEuclidean { prior_parent: Item, item: Item },
-    AlreadyBoxed { prior_box: Item, item: Item },
+    AlreadyBoxed { prior_parent: Item, item: Item },
     Other(anyhow::Error),
 }
 impl From<sqlx::Error> for BoxingError {
@@ -239,7 +239,7 @@ impl std::fmt::Display for BoxingError {
                 "Non-euclidean boxes not yet supported. '{}' was previously in box '{}', but will now be a parent of '{}'.",
                 item.name, prior_parent.name, prior_parent.name
             ),
-            Self::AlreadyBoxed { item, prior_box } => {
+            Self::AlreadyBoxed { item, prior_parent: prior_box } => {
                 write!(f, "'{}' is already in box {}.", item.name, prior_box.name)
             }
             Self::Other(err) => write!(f, "An error occurred: {}", err),
@@ -265,9 +265,9 @@ pub(crate) async fn box_all(
     for item in items {
         let contents = box_contents(connection, item).await?;
         if contents.find(r#box.id).is_some() {
-            return Err(BoxingError::AlreadyBoxed {
-                item: item.clone(),
-                prior_box: r#box.clone(),
+            return Err(BoxingError::NonEuclidean { 
+                item: r#box.clone(),
+                prior_parent: item.clone(),
             });
         }
 
@@ -279,7 +279,7 @@ pub(crate) async fn box_all(
             .fetch_optional(&mut *connection)
             .await?
         {
-            return Err(BoxingError::NonEuclidean {
+            return Err(BoxingError::AlreadyBoxed {
                 prior_parent,
                 item: item.clone(),
             });
