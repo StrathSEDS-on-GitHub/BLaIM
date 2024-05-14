@@ -24,7 +24,7 @@ fn fuzzy_search<'b, T>(
         .filter_map(|s| MATCHER.fuzzy_match(key(&s), needle).map(|score| (score, s)))
         .collect();
     scores.sort_by_key(|(score, _)| *score);
-    scores.splice(scores.len().min(3).., []);
+    scores.splice(scores.len().min(5).., []);
     scores
 }
 
