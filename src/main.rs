@@ -189,6 +189,18 @@ async fn borrow(
 
     let previous_owner = db::get_last_holder(&ctx.data().pool, selected.id).await?;
 
+    if let Some(ref owner) = previous_owner
+        && owner == &ctx.author().id.to_string()
+    {
+        let embed = CreateEmbed::new()
+            .title("You already own this item")
+            .image("https://i.kym-cdn.com/entries/icons/original/000/023/397/C-658VsXoAo3ovC.jpg");
+
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    }
+
     let (embed, components) = make_embed(
         selected,
         &previous_owner,
@@ -326,15 +338,22 @@ async fn give(
         return Ok(());
     }
 
+    if let Some(ref owner) = owner
+        && owner == &user.id.to_string()
+    {
+        let embed = CreateEmbed::new()
+            .title("You already own this item")
+            .image("https://i.kym-cdn.com/entries/icons/original/000/023/397/C-658VsXoAo3ovC.jpg");
+
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    }
+
     let inserted_id = db::borrow_item(&ctx.data().pool, selected.id, &user.id.to_string()).await?;
 
-    let (embed, components) = make_embed(
-        selected,
-        &owner,
-        &user.id.to_string(),
-        alternatives,
-    )
-    .await;
+    let (embed, components) =
+        make_embed(selected, &owner, &user.id.to_string(), alternatives).await;
     let reply = CreateReply::default()
         .embed(embed.clone())
         .components(components);
