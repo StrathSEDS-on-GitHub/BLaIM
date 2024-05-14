@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM meta WHERE child = ? AND parent = ? RETURNING child;",
+  "describe": {
+    "columns": [
+      {
+        "name": "child",
+        "ordinal": 0,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d3e28200da963bed7cc13d8cfd055e6894859d53ecdf0dbce38bf43785736d8b"
+}

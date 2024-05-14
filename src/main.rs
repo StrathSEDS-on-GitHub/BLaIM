@@ -4,9 +4,9 @@
 #![feature(let_chains)]
 #![feature(closure_lifetime_binder)]
 
-use std::{boxed, env};
 use std::future::Future;
 use std::pin::Pin;
+use std::env;
 
 use db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
@@ -15,10 +15,10 @@ use serenity::all::{
     CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu,
     CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, User,
 };
-use serenity::futures::future::{join_all, try_join_all};
+use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
 use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{Acquire, Sqlite, SqliteConnection, SqlitePool, Transaction};
+use sqlx::{Acquire, SqliteConnection, SqlitePool};
 
 mod db;
 
@@ -79,22 +79,23 @@ async fn make_embed(
             "Boxed items",
             format!(
                 "Transfered **{}** boxed items \n{}",
-                boxed_items_count,
-                updated_items
+                boxed_items_count, updated_items
             ),
             false,
         );
     }
 
     if present_updates.len() > 0 {
-        let updates = "```".to_string() + &present_updates
-            .iter()
-            .map(|(parent, item, present)| {
-                let emoji = if *present { "🟢" } else { "🔴" };
-                format!(" 🗃️ {} {} {}", parent.name, emoji, item.name)
-            })
-            .collect::<Vec<_>>()
-            .join("\n") + "```";
+        let updates = "```".to_string()
+            + &present_updates
+                .iter()
+                .map(|(parent, item, present)| {
+                    let emoji = if *present { "🟢" } else { "🔴" };
+                    format!(" 🗃️ {} {} {}", parent.name, emoji, item.name)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+            + "```";
 
         embed = embed.field("Box contents updates", updates, false);
     }
@@ -524,7 +525,7 @@ async fn register_item(
     rename = "box",
     subcommands("box_info", "box_add", "box_rm")
 )]
-pub async fn r#box(ctx: Context<'_>) -> anyhow::Result<()> {
+pub async fn r#box(_ctx: Context<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -556,7 +557,9 @@ pub async fn box_info(
     let embed = CreateEmbed::new()
         .title(format!(":white_check_mark: Box contents for {}", item.name))
         .description(message)
-        .footer(CreateEmbedFooter::new("🟢 = tracked within box. 🔴 = not within box."));
+        .footer(CreateEmbedFooter::new(
+            "🟢 = tracked within box. 🔴 = not within box.",
+        ));
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -594,6 +597,7 @@ pub async fn box_add(
     item4: Option<String>,
 ) -> anyhow::Result<()> {
     let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
     let items: Vec<_> = try_join_all(
         [Some(r#box), Some(item), item2, item3, item4]
             .into_iter()
@@ -630,15 +634,29 @@ pub async fn box_add(
 
     let (box_item, rest) = items.split_first().unwrap();
 
-    db::box_all(
-        &mut *connection,
+    if let Err(err) = db::box_all(
+        &mut *transaction,
         &ctx.author().id.to_string(),
         box_item,
         rest,
     )
-    .await?;
+    .await
+    {
+        ctx.send(
+            CreateReply::default().embed(
+                CreateEmbed::new()
+                    .title(":x: Error")
+                    .description(err.to_string()),
+            ),
+        )
+        .await?;
 
-    ctx.reply(":white_check_mark: Items added to box").await?;
+        transaction.rollback().await?;
+    } else {
+        ctx.send(CreateReply::default().embed(CreateEmbed::new().title(":white_check_mark: Items added to box")))
+            .await?;
+        transaction.commit().await?;
+    }
 
     Ok(())
 }
@@ -646,6 +664,9 @@ pub async fn box_add(
 #[poise::command(slash_command, rename = "rm")]
 pub async fn box_rm(
     ctx: Context<'_>,
+    r#box: String,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
     item: String,
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
@@ -656,10 +677,63 @@ pub async fn box_rm(
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
-    #[description = "Item"]
-    #[autocomplete = autocomplete_item]
-    item5: Option<String>,
 ) -> anyhow::Result<()> {
+    let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
+
+    let items: Vec<_> = try_join_all(
+        [Some(r#box), Some(item), item2, item3, item4]
+            .into_iter()
+            .flatten()
+            .map(|it| lookup_item_retaining_query(it, &mut &ctx.data().pool)),
+    )
+    .await?;
+
+    let result_is_none = |it: &&(String, Option<db::Item>)| -> bool { it.1.is_none() };
+    let format_error = |it: &(String, Option<db::Item>)| -> String {
+        format!(":red_circle: Couldn't find anything matching '{}'", it.0)
+    };
+
+    let mut errors = items
+        .iter()
+        .filter(result_is_none)
+        .map(format_error)
+        .peekable();
+
+    if let Some(_) = errors.peek() {
+        let embed = CreateEmbed::new()
+            .title("Couldn't find items")
+            .description(errors.collect::<Vec<_>>().join("\n"));
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+
+    let items = items
+        .into_iter()
+        .map(|(_, b)| b.unwrap())
+        .collect::<Vec<_>>();
+
+    let (box_item, items) = items.split_first().unwrap();
+
+    if let Err(err) = db::unbox_all(&mut *transaction, box_item, items).await {
+        ctx.send(
+            CreateReply::default().embed(
+                CreateEmbed::new()
+                    .title(":x: Error")
+                    .description(err.to_string()),
+            ),
+        )
+        .await?;
+
+        transaction.rollback().await?;
+    } else {
+        ctx.send(CreateReply::default().embed(CreateEmbed::new().title(":white_check_mark: Items removed from box")))
+            .await?;
+
+        transaction.commit().await?;
+    }
+
     Ok(())
 }
 

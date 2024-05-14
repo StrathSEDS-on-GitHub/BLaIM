@@ -1,11 +1,11 @@
+use std::collections::VecDeque;
 use std::fmt::{self, Display};
 use std::sync::LazyLock;
-use std::{cell::RefCell, collections::VecDeque};
 
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use sqlx::{Acquire, SqliteConnection, Row};
+use sqlx::{Acquire, Row, SqliteConnection};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
@@ -111,10 +111,17 @@ pub(crate) async fn borrow_item(
     for (_, node, _) in items.iter_depth_first() {
         let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent IN (");
         let mut sep = builder.separated(",");
-        owned_items.iter().for_each(|it| { sep.push_bind(it); });
-        builder.push(")) WHERE child = ").push_bind(node.item.id).push(" AND present != (parent IN (");
+        owned_items.iter().for_each(|it| {
+            sep.push_bind(it);
+        });
+        builder
+            .push(")) WHERE child = ")
+            .push_bind(node.item.id)
+            .push(" AND present != (parent IN (");
         let mut sep = builder.separated(",");
-        owned_items.iter().for_each(|it| { sep.push_bind(it); });
+        owned_items.iter().for_each(|it| {
+            sep.push_bind(it);
+        });
         builder.push(")) RETURNING parent, present;");
 
         let mut query = builder.build();
@@ -126,9 +133,7 @@ pub(crate) async fn borrow_item(
             query = query.bind(i);
         }
 
-        let result = query
-            .fetch_optional(&mut *connection)
-            .await?;
+        let result = query.fetch_optional(&mut *connection).await?;
 
         if let Some(row) = result {
             let parent: i64 = row.get(0);
@@ -185,7 +190,7 @@ pub(crate) async fn get_items_by_owner(
     pool: &mut SqliteConnection,
     owner: &str,
 ) -> anyhow::Result<Vec<Item>> {
-    let mut connection = pool.acquire().await?;
+    let connection = pool.acquire().await?;
     let items = sqlx::query_as!(
         Item,
         "SELECT i.id, i.name
@@ -249,14 +254,6 @@ impl std::error::Error for BoxingError {
             _ => None,
         }
     }
-
-    fn description(&self) -> &str {
-        match self {
-            Self::NonEuclidean { .. } => "Non-euclidean boxes not yet supported.",
-            Self::AlreadyBoxed { .. } => "Item is already in a box.",
-            Self::Other(_) => "An error occurred.",
-        }
-    }
 }
 
 pub(crate) async fn box_all(
@@ -302,6 +299,61 @@ pub(crate) async fn box_all(
         .await?;
     }
 
+    Ok(())
+}
+
+#[derive(Debug)]
+pub enum UnboxingError {
+    NotFound { item: Item, r#box: Item },
+    Other(anyhow::Error),
+}
+
+impl Display for UnboxingError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::NotFound { item, r#box } => {
+                write!(f, "'{}' is not in box '{}'.", item.name, r#box.name)
+            }
+            Self::Other(err) => write!(f, "An error occurred: {}", err),
+        }
+    }
+}
+
+impl std::error::Error for UnboxingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Other(err) => Some(err.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl From<sqlx::Error> for UnboxingError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Other(err.into())
+    }
+}
+
+pub(crate) async fn unbox_all(
+    connection: &mut SqliteConnection,
+    r#box: &Item,
+    items: &[Item],
+) -> Result<(), UnboxingError> {
+    for item in items {
+        if let None = sqlx::query!(
+            "DELETE FROM meta WHERE child = ? AND parent = ? RETURNING child;",
+            item.id,
+            r#box.id,
+        )
+        .fetch_optional(&mut *connection)
+        .await?
+        {
+            return Err(UnboxingError::NotFound {
+                item: item.clone(),
+                r#box: r#box.clone(),
+            });
+        }
+    }
     Ok(())
 }
 
