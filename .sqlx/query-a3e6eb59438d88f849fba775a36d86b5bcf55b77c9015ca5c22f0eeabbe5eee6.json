@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT to_user, time FROM borrow WHERE item_id = ? ORDER BY ordering DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "to_user",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "time",
+        "ordinal": 1,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a3e6eb59438d88f849fba775a36d86b5bcf55b77c9015ca5c22f0eeabbe5eee6"
+}

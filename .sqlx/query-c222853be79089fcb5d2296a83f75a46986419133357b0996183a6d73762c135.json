@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM borrow WHERE ordering = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c222853be79089fcb5d2296a83f75a46986419133357b0996183a6d73762c135"
+}

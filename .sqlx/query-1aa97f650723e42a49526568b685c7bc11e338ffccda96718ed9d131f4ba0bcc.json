@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE borrow SET item_id = ? WHERE ordering = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1aa97f650723e42a49526568b685c7bc11e338ffccda96718ed9d131f4ba0bcc"
+}

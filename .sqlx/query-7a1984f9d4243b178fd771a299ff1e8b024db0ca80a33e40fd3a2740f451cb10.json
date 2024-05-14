@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO items (strid, name) VALUES (?, ?);",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7a1984f9d4243b178fd771a299ff1e8b024db0ca80a33e40fd3a2740f451cb10"
+}

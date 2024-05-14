@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT to_user FROM borrow WHERE item_id = ? ORDER BY ordering DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "to_user",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "94a9db9ab480bb3db72d72f52e51d8f7b5b808b796be1f827d9e938600215893"
+}
