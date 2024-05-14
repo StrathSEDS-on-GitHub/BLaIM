@@ -1,4 +1,5 @@
 #![feature(lazy_cell)]
+#![feature(iter_intersperse)]
 #![feature(let_chains)]
 
 use std::env;
@@ -9,6 +10,7 @@ use serenity::all::{
     CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu,
     CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, User,
 };
+use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
@@ -386,6 +388,157 @@ async fn register_item(
     Ok(())
 }
 
+#[poise::command(
+    slash_command,
+    rename = "box",
+    subcommands("box_info", "box_add", "box_rm")
+)]
+pub async fn r#box(ctx: Context<'_>) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[poise::command(slash_command, rename = "info")]
+pub async fn box_info(
+    ctx: Context<'_>,
+    #[description = "Box item"]
+    #[autocomplete = autocomplete_item]
+    r#box: String,
+) -> anyhow::Result<()> {
+    let item = db::lookup_item(&ctx.data().pool, &r#box).await?;
+    let item = match item.first() {
+        Some(item) => item,
+        None => {
+            let embed = CreateEmbed::new()
+                .title("No items found")
+                .description("No items found with that name. Please try again.");
+
+            let reply = CreateReply::default().embed(embed);
+
+            ctx.send(reply).await?;
+            return Ok(());
+        }
+    };
+
+    let items = db::box_contents(&ctx.data().pool, item).await?;
+    let message = "```".to_owned()
+        + &items
+            .iter_depth_first()
+            .map(|(depth, it, last_child)| {
+                let prefix_size = depth * 4;
+                let tree_icon = if last_child { "└─" } else { "├─" };
+                let present_icon = if it.item.present { "🟢" } else { "🔴" };
+                format!(
+                    "{: <prefix_size$} {tree_icon} {present_icon} {}",
+                    "", it.item.item.name
+                )
+            })
+            .intersperse('\n'.to_string())
+            .collect::<String>()
+        + "```";
+
+    let embed = CreateEmbed::new()
+        .title(format!(":white_check_mark: Box contents for {}", item.name))
+        .description(message);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
+
+    Ok(())
+}
+
+async fn lookup_item_retaining_query(
+    item: String,
+    pool: &SqlitePool,
+) -> anyhow::Result<(String, Option<db::Item>)> {
+    let found = db::lookup_item(&pool, &item).await?.into_iter().nth(0);
+    anyhow::Ok((item, found))
+}
+
+#[poise::command(slash_command, rename = "add")]
+pub async fn box_add(
+    ctx: Context<'_>,
+    #[description = "Box item"]
+    #[autocomplete = autocomplete_item]
+    r#box: String,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item: String,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item2: Option<String>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item3: Option<String>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item4: Option<String>,
+) -> anyhow::Result<()> {
+    let items: Vec<_> = try_join_all(
+        [Some(r#box), Some(item), item2, item3, item4]
+            .into_iter()
+            .flatten()
+            .map(|it| lookup_item_retaining_query(it, &ctx.data().pool)),
+    )
+    .await?;
+
+    // It does not compile if I inline it. wtf.
+    let result_is_none = |it: &&(String, Option<db::Item>)| -> bool { it.1.is_none() };
+    let format_error = |it: &(String, Option<db::Item>)| -> String {
+        format!(":red_circle: Couldn't find anything matching '{}'", it.0)
+    };
+
+    let mut errors = items
+        .iter()
+        .filter(result_is_none)
+        .map(format_error)
+        .peekable();
+
+    if let Some(_) = errors.peek() {
+        let embed = CreateEmbed::new()
+            .title("Couldn't find items")
+            .description(errors.collect::<Vec<_>>().join("\n"));
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+
+    let items = items
+        .into_iter()
+        .map(|(_, b)| b.unwrap())
+        .collect::<Vec<_>>();
+
+    let (box_item, rest) = items.split_first().unwrap();
+
+    db::box_all(
+        &ctx.data().pool,
+        &ctx.author().id.to_string(),
+        box_item,
+        rest,
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command, rename = "rm")]
+pub async fn box_rm(
+    ctx: Context<'_>,
+    item: String,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item2: Option<String>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item3: Option<String>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item4: Option<String>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item5: Option<String>,
+) -> anyhow::Result<()> {
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     // Login with a bot token from the environment
@@ -400,7 +553,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![borrow(), blame(), give(), register_item()],
+            commands: vec![borrow(), blame(), give(), register_item(), r#box()],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id, i.name, m.present\n                FROM meta m\n                JOIN items i ON m.child = i.id\n                WHERE m.parent = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "present",
+        "ordinal": 2,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2e4db5be84306ab11f203f67ab5929802faefdcb50b5a1875670adef0dbcdcbb"
+}
