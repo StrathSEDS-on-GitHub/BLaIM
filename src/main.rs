@@ -4,9 +4,9 @@
 #![feature(let_chains)]
 #![feature(closure_lifetime_binder)]
 
+use std::env;
 use std::future::Future;
 use std::pin::Pin;
-use std::env;
 
 use db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
@@ -359,23 +359,11 @@ async fn blame(
         return Ok(());
     }
 
-    let history_text = history
-        .windows(2)
-        .map(|pair| {
-            let (to, time) = &pair[0];
-            let (from, _) = &pair[1];
+    let borrowers = history
+        .iter()
+        .map(|(borrower, _)| format!("<@{}>\n", borrower));
 
-            format!(
-                "<@{}> :right_arrow: <@{}> <t:{}:R>",
-                from,
-                to,
-                time.timestamp()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let embed = CreateEmbed::new()
+    let mut embed = CreateEmbed::new()
         .title(format!("Borrow history for {}", item.name))
         .field(
             ":green_square: Current holder",
@@ -385,8 +373,24 @@ async fn blame(
                 history.first().unwrap().1.timestamp()
             ),
             false,
-        )
-        .description(history_text);
+        );
+    if borrowers.len() > 1 {
+        let from_column: String = borrowers.clone().skip(1).chain(std::iter::once("👻".to_string())).collect();
+        let to_column: String = borrowers
+            .clone()
+            .map(|x| {
+                format!(":right_arrow:{}{}", "\x7f ".repeat(6), x)
+            })
+            .collect();
+        let time_column = history
+            .iter()
+            .map(|(_, time)| format!("<t:{}:R>\n", time.timestamp()))
+            .collect::<String>();
+        embed = embed
+            .field("From", from_column, true)
+            .field(format!("{}To", "\x7f ".repeat(12)), to_column, true)
+            .field("Time", time_column, true);
+    }
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -653,8 +657,11 @@ pub async fn box_add(
 
         transaction.rollback().await?;
     } else {
-        ctx.send(CreateReply::default().embed(CreateEmbed::new().title(":white_check_mark: Items added to box")))
-            .await?;
+        ctx.send(
+            CreateReply::default()
+                .embed(CreateEmbed::new().title(":white_check_mark: Items added to box")),
+        )
+        .await?;
         transaction.commit().await?;
     }
 
@@ -728,8 +735,11 @@ pub async fn box_rm(
 
         transaction.rollback().await?;
     } else {
-        ctx.send(CreateReply::default().embed(CreateEmbed::new().title(":white_check_mark: Items removed from box")))
-            .await?;
+        ctx.send(
+            CreateReply::default()
+                .embed(CreateEmbed::new().title(":white_check_mark: Items removed from box")),
+        )
+        .await?;
 
         transaction.commit().await?;
     }
