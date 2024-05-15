@@ -11,9 +11,7 @@ use std::pin::Pin;
 use db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{
-    ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton,
-    CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu,
-    CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, User,
+    ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, GuildId, User
 };
 use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
@@ -28,6 +26,12 @@ struct Data {
 
 type Error = anyhow::Error;
 type Context<'a> = poise::Context<'a, Data, Error>;
+
+const ALLOWED_GUILDS : &[u64] = &[
+    755426438185877614, 
+    366211396511334420, 
+    1138724351613599804, 
+];
 
 async fn autocomplete_item<'a>(
     ctx: Context<'_>,
@@ -152,7 +156,7 @@ async fn handle_edits<T>(
 
     while let Some(ref mut mci) = ComponentInteractionCollector::new(ctx)
         .author_id(ctx.author().id)
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(15))
         .channel_id(ctx.channel_id())
         .message_id(message_id)
         .filter(|i| {
@@ -228,6 +232,14 @@ async fn borrow(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
     let items = db::lookup_item(&mut *transaction, &item).await?;
@@ -331,6 +343,14 @@ async fn blame(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let item = db::lookup_item(&mut *connection, &item).await?;
     let item = match item.first() {
@@ -406,6 +426,14 @@ async fn give(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
     let items = db::lookup_item(&mut *transaction, &item).await?;
@@ -518,6 +546,14 @@ async fn register_item(
     #[description = "Short ID (e.g ffmini2)"] strid: String,
     #[description = "Long descriptor of the item"] name: String,
 ) -> anyhow::Result<()> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     db::register_item(&mut *ctx.data().pool.acquire().await?, &strid, &name).await?;
     ctx.reply(":white_check_mark: Item registered").await?;
 
@@ -540,6 +576,14 @@ pub async fn box_info(
     #[autocomplete = autocomplete_item]
     r#box: String,
 ) -> anyhow::Result<()> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let item = db::lookup_item(&mut connection, &r#box).await?;
     let item = match item.first() {
@@ -600,6 +644,14 @@ pub async fn box_add(
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
 ) -> anyhow::Result<()> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
     let items: Vec<_> = try_join_all(
@@ -685,6 +737,14 @@ pub async fn box_rm(
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
 ) -> anyhow::Result<()> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
 
@@ -766,7 +826,9 @@ async fn main() -> color_eyre::Result<()> {
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                for guild_id in ALLOWED_GUILDS {
+                    poise::builtins::register_in_guild(ctx, &framework.options().commands, GuildId::from(*guild_id)).await?;
+                }
                 Ok(Data { pool })
             })
         })
@@ -777,9 +839,4 @@ async fn main() -> color_eyre::Result<()> {
         .await;
     client.unwrap().start().await.unwrap();
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }
