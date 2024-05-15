@@ -11,7 +11,9 @@ use std::pin::Pin;
 use db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{
-    ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, GuildId, User
+    ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton,
+    CreateEmbed, CreateEmbedFooter, CreateInteractionResponse, CreateSelectMenu,
+    CreateSelectMenuKind, CreateSelectMenuOption, EditMessage, GuildId, User,
 };
 use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
@@ -27,11 +29,7 @@ struct Data {
 type Error = anyhow::Error;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-const ALLOWED_GUILDS : &[u64] = &[
-    755426438185877614, 
-    366211396511334420, 
-    1138724351613599804, 
-];
+const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420, 1138724351613599804];
 
 async fn autocomplete_item<'a>(
     ctx: Context<'_>,
@@ -90,7 +88,7 @@ async fn make_embed(
     }
 
     if present_updates.len() > 0 {
-        let updates = "```".to_string()
+        let updates = format!("**{}** items updated\n```", present_updates.len())
             + &present_updates
                 .iter()
                 .map(|(parent, item, present)| {
@@ -101,7 +99,11 @@ async fn make_embed(
                 .join("\n")
             + "```";
 
-        embed = embed.field("Box contents updates", updates, false);
+        embed = embed
+            .field("Box contents updates", updates, false)
+            .footer(CreateEmbedFooter::new(
+                "🟢 = added to box. 🔴 = removed from box.",
+            ));
     }
 
     let mut components = vec![CreateActionRow::Buttons(vec![
@@ -395,12 +397,14 @@ async fn blame(
             false,
         );
     if borrowers.len() > 1 {
-        let from_column: String = borrowers.clone().skip(1).chain(std::iter::once("👻".to_string())).collect();
+        let from_column: String = borrowers
+            .clone()
+            .skip(1)
+            .chain(std::iter::once("👻".to_string()))
+            .collect();
         let to_column: String = borrowers
             .clone()
-            .map(|x| {
-                format!(":right_arrow:{}{}", "\x7f ".repeat(6), x)
-            })
+            .map(|x| format!(":right_arrow:{}{}", "\x7f ".repeat(6), x))
             .collect();
         let time_column = history
             .iter()
@@ -827,7 +831,12 @@ async fn main() -> color_eyre::Result<()> {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 for guild_id in ALLOWED_GUILDS {
-                    poise::builtins::register_in_guild(ctx, &framework.options().commands, GuildId::from(*guild_id)).await?;
+                    poise::builtins::register_in_guild(
+                        ctx,
+                        &framework.options().commands,
+                        GuildId::from(*guild_id),
+                    )
+                    .await?;
                 }
                 Ok(Data { pool })
             })
