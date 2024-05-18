@@ -5,7 +5,10 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use sqlx::{Acquire, Row, SqliteConnection};
+use serenity::futures::future::try_join_all;
+use serenity::futures::{Stream, StreamExt, TryStreamExt};
+use sqlx::pool::PoolConnection;
+use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
@@ -265,7 +268,7 @@ pub(crate) async fn box_all(
     for item in items {
         let contents = box_contents(connection, item).await?;
         if contents.find(r#box.id).is_some() {
-            return Err(BoxingError::NonEuclidean { 
+            return Err(BoxingError::NonEuclidean {
                 item: r#box.clone(),
                 prior_parent: item.clone(),
             });
@@ -438,7 +441,6 @@ impl ItemTree {
 
 impl Display for ItemTree {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "```")?;
         self.iter_depth_first()
             .try_for_each(|(depth, it, last_child)| {
                 let prefix_size = depth * 4;
@@ -455,8 +457,7 @@ impl Display for ItemTree {
                     "{: <prefix_size$}{tree_icon} {present_icon} {}\n",
                     "", it.item.name
                 )
-            })?;
-        write!(f, "```")
+            })
     }
 }
 
@@ -515,4 +516,46 @@ pub(crate) async fn box_contents(
         open_set.extend(tree.add_children(child_trees));
     }
     Ok(root)
+}
+
+pub async fn get_items(
+    connection: &mut SqliteConnection,
+    user: Option<String>,
+) -> anyhow::Result<Vec<ItemTree>> {
+    let single_conn = connection.acquire().await?;
+    let roots = if let Some(user) = user {
+        sqlx::query_as!(
+            Item,
+            "SELECT i.id, i.name
+            FROM borrow b
+            JOIN (
+                SELECT item_id, MAX(ordering) AS max_ordering
+                FROM borrow
+                GROUP BY item_id
+            ) AS max_orders
+            ON b.item_id = max_orders.item_id 
+            LEFT JOIN meta m ON b.item_id = m.child
+            JOIN items i ON b.item_id = i.id
+            WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND m.parent IS NULL;",
+            user
+        )
+        .fetch_all(&mut *single_conn)
+        .await?
+    } else {
+        sqlx::query_as!(
+            Item,
+            "SELECT id, name FROM items
+             LEFT JOIN meta ON meta.child = id WHERE meta.parent IS NULL;"
+        )
+        .fetch_all(&mut *single_conn)
+        .await?
+    };
+
+    let mut trees = Vec::new();
+    for root in &roots {
+        let tree = box_contents(&mut *single_conn, &root).await?;
+        trees.push(tree);
+    }
+
+    Ok(trees)
 }

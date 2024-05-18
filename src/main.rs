@@ -3,6 +3,7 @@
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
 #![feature(closure_lifetime_binder)]
+#![feature(async_closure)]
 
 use std::env;
 use std::future::Future;
@@ -136,6 +137,12 @@ async fn make_embed(
     }
 
     (embed, components)
+}
+
+trait AsyncFnMut<A> {
+    type Output;
+
+    async fn call(&mut self, args: A) -> Self::Output;
 }
 
 async fn handle_edits<T>(
@@ -333,6 +340,28 @@ async fn borrow(
         transaction,
     )
     .await?;
+
+    Ok(())
+}
+
+/// List items held by a user or all items
+#[poise::command(slash_command)]
+async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
+    let mut connection = ctx.data().pool.acquire().await?;
+    let items = db::get_items(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
+    let mut message =
+        "```".to_string() + &items.iter().map(|it| it.to_string()).collect::<String>() + "```";
+        if let Some(user) = &user {
+            message.insert_str(0, &format!("Items held by <@{}>\n", user.id))
+        }
+    let embed = CreateEmbed::new()
+        .title(user.map_or_else(
+            || "All items".to_string(),
+            |_| "Items".to_string()
+        ))
+        .description(message);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
 }
@@ -605,7 +634,7 @@ pub async fn box_info(
     };
 
     let items = db::box_contents(&mut connection, item).await?;
-    let message = items.to_string();
+    let message = "```".to_string() + &items.to_string() + "```";
     let embed = CreateEmbed::new()
         .title(format!(":white_check_mark: Box contents for {}", item.name))
         .description(message)
@@ -825,7 +854,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![borrow(), blame(), give(), register_item(), r#box()],
+            commands: vec![borrow(), blame(), give(), register_item(), r#box(), items()],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
