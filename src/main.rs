@@ -81,7 +81,7 @@ async fn make_embed(
         embed = embed.field(
             "Boxed items",
             format!(
-                "Transfered **{}** boxed items \n{}",
+                "Transfered **{}** boxed items \n```{}```",
                 boxed_items_count, updated_items
             ),
             false,
