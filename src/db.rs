@@ -5,10 +5,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use serenity::futures::future::try_join_all;
-use serenity::futures::{Stream, StreamExt, TryStreamExt};
-use sqlx::pool::PoolConnection;
-use sqlx::{Acquire, Row, Sqlite, SqliteConnection};
+use sqlx::{Acquire, Row, SqliteConnection};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {

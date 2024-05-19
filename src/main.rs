@@ -139,12 +139,6 @@ async fn make_embed(
     (embed, components)
 }
 
-trait AsyncFnMut<A> {
-    type Output;
-
-    async fn call(&mut self, args: A) -> Self::Output;
-}
-
 async fn handle_edits<T>(
     ctx: Context<'_>,
     state: T,
@@ -347,6 +341,14 @@ async fn borrow(
 /// List items held by a user or all items
 #[poise::command(slash_command)]
 async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
     let mut connection = ctx.data().pool.acquire().await?;
     let items = db::get_items(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
     let mut message =
