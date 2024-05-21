@@ -108,7 +108,7 @@ pub(crate) async fn borrow_item(
         .iter()
         .map(|i| i.id)
         .collect::<Vec<_>>();
-    for (_, node, _) in items.iter_depth_first() {
+    for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
         let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent IN (");
         let mut sep = builder.separated(",");
         owned_items.iter().for_each(|it| {
