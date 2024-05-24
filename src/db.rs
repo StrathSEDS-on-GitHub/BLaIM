@@ -533,7 +533,7 @@ pub async fn get_items(
             ON b.item_id = max_orders.item_id 
             LEFT JOIN meta m ON b.item_id = m.child
             JOIN items i ON b.item_id = i.id
-            WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND m.parent IS NULL;",
+            WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND (m.parent IS NULL OR m.present IS FALSE);",
             user
         )
         .fetch_all(&mut *single_conn)

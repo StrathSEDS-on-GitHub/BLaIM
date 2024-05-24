@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT i.id, i.name\n            FROM borrow b\n            JOIN (\n                SELECT item_id, MAX(ordering) AS max_ordering\n                FROM borrow\n                GROUP BY item_id\n            ) AS max_orders\n            ON b.item_id = max_orders.item_id \n            LEFT JOIN meta m ON b.item_id = m.child\n            JOIN items i ON b.item_id = i.id\n            WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND (m.parent IS NULL OR m.present IS FALSE);",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "15641a0bfe2be9353a5f05a9db92cdbb2fa118a54a278e4353b95851f4cd0f25"
+}

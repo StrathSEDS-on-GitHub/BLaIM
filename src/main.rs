@@ -351,16 +351,22 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let items = db::get_items(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
-    let mut message =
-        "```".to_string() + &items.iter().map(|it| it.to_string()).collect::<String>() + "```";
-        if let Some(user) = &user {
-            message.insert_str(0, &format!("Items held by <@{}>\n", user.id))
-        }
+    let mut message = "```".to_string()
+        + &items
+            .into_iter()
+            .map(|it| {
+                it.into_iter_depth_first()
+                    .filter(|(_, item, _)| item.present)
+                    .collect::<ItemTree>()
+                    .to_string()
+            })
+            .collect::<String>()
+        + "```";
+    if let Some(user) = &user {
+        message.insert_str(0, &format!("Items held by <@{}>\n", user.id))
+    }
     let embed = CreateEmbed::new()
-        .title(user.map_or_else(
-            || "All items".to_string(),
-            |_| "Items".to_string()
-        ))
+        .title(user.map_or_else(|| "All items".to_string(), |_| "Items".to_string()))
         .description(message);
 
     ctx.send(CreateReply::default().embed(embed)).await?;
