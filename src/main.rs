@@ -431,8 +431,10 @@ async fn blame(
                 history.first().unwrap().0,
                 history.first().unwrap().1.timestamp()
             ),
-            false,
-        );
+            true,
+        )
+        .field("🆔 Identifier", &item.strid, true)
+        .field("", "", true);
     if borrowers.len() > 1 {
         let from_column: String = borrowers
             .clone()
@@ -580,9 +582,17 @@ async fn give(
     Ok(())
 }
 
+#[poise::command(
+    slash_command,
+    subcommands("item_register", "item_delete")
+)]
+async fn item(_ctx: Context<'_>) -> anyhow::Result<()> {
+    Ok(())
+}
+
 /// Registers an item in the database
-#[poise::command(slash_command)]
-async fn register_item(
+#[poise::command(slash_command, rename = "register")]
+async fn item_register(
     ctx: Context<'_>,
     #[description = "Short ID (e.g ffmini2)"] strid: String,
     #[description = "Long descriptor of the item"] name: String,
@@ -597,6 +607,132 @@ async fn register_item(
     }
     db::register_item(&mut *ctx.data().pool.acquire().await?, &strid, &name).await?;
     ctx.reply(":white_check_mark: Item registered").await?;
+
+    Ok(())
+}
+
+/// Deletes an item from the database
+#[poise::command(slash_command, rename = "delete")]
+async fn item_delete(
+    ctx: Context<'_>,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item: String,
+) -> anyhow::Result<()> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+    let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
+    let items = db::lookup_item(&mut *transaction, &item).await?;
+
+    let selected = match items.first() {
+        Some(selected) => selected,
+        None => {
+            let embed = CreateEmbed::new()
+                .title("No items found")
+                .description("No items found with that name. Please try again.");
+
+            let reply = CreateReply::default().embed(embed);
+
+            ctx.send(reply).await?;
+            return Ok(());
+        }
+    };
+
+    let task = for<'a> |state: &'a State,
+                        connection: &'a mut SqliteConnection,
+                        item_id: i64|
+             -> Pin<
+        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
+            let alternatives = state
+                .items
+                .iter()
+                .filter(|it| it.id != item_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let orphans = db::delete_item(&mut *connection, selected).await?;
+            let mut components = vec![CreateActionRow::Buttons(vec![
+                CreateButton::new("cancel")
+                    .label("Cancel")
+                    .style(ButtonStyle::Danger),
+                CreateButton::new("commit")
+                    .label("Confirm")
+                    .style(ButtonStyle::Primary),
+            ])];
+
+            if alternatives.len() > 0 {
+                components.insert(
+                    0,
+                    CreateActionRow::SelectMenu(
+                        CreateSelectMenu::new(
+                            "replace",
+                            CreateSelectMenuKind::String {
+                                options: alternatives
+                                    .into_iter()
+                                    .map(|item| {
+                                        CreateSelectMenuOption::new(
+                                            item.name.clone(),
+                                            item.id.to_string(),
+                                        )
+                                    })
+                                    .collect(),
+                            },
+                        )
+                        .placeholder("🔁 Pick a different item"),
+                    ),
+                );
+            }
+
+            let mut desc = format!("Item {} has been deleted.", selected.name);
+
+            let orphan_count = orphans.iter_depth_first().count() - 1;
+            if orphan_count > 0 {
+                desc.push_str(&format!(
+                    " **{}** items have been orphaned.\n```\n{}\n```",
+                    orphan_count,
+                    orphans
+                ));
+            }
+
+            let embed = CreateEmbed::new()
+                .title(":white_check_mark: Item deleted")
+                .description(desc);
+            Ok((embed, components))
+        })
+    };
+
+    struct State { items: Vec<db::Item> }
+    let state = State {
+        items: items.clone(),
+    };
+    let (embed, components) = task(&state, &mut *transaction, selected.id).await?;
+    let reply = CreateReply::default()
+        .embed(embed.clone())
+        .components(components);
+
+    let handle = ctx.send(reply).await?;
+
+    let mut redo_conn = ctx.data().pool.acquire().await?;
+
+    handle_edits(
+        ctx,
+        state,
+        &handle,
+        task,
+        embed,
+        &mut redo_conn,
+        transaction,
+    )
+    .await?;
 
     Ok(())
 }
@@ -862,7 +998,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![borrow(), blame(), give(), register_item(), r#box(), items()],
+            commands: vec![borrow(), blame(), give(), item(), r#box(), items()],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name FROM items;",
+  "query": "SELECT id, strid, name FROM items WHERE strid = ? OR name = ?",
   "describe": {
     "columns": [
       {
@@ -9,18 +9,24 @@
         "type_info": "Int64"
       },
       {
-        "name": "name",
+        "name": "strid",
         "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
         "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 2
     },
     "nullable": [
+      false,
       false,
       false
     ]
   },
-  "hash": "8a4e26ac310e52c70f4a7487b85f1da7bf84ddbd7e291e4e5fdfc5d69628c30b"
+  "hash": "4444ef41f24259b8b37f297e112bdf1f22df571874006c17e55cb5d14f41a41a"
 }

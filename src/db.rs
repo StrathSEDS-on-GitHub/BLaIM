@@ -11,6 +11,7 @@ use sqlx::{Acquire, Row, SqliteConnection};
 pub struct Item {
     pub id: i64,
     pub name: String,
+    pub strid: String,
 }
 
 fn fuzzy_search<'b, T>(
@@ -35,14 +36,14 @@ pub(crate) async fn lookup_item(
     let item = item.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Item,
-        "SELECT id, name FROM items WHERE strid = ? OR name = ?",
+        "SELECT id, strid, name FROM items WHERE strid = ? OR name = ?",
         item,
         item
     )
     .fetch_all(&mut *connection)
     .await?;
 
-    let fuzzy_matches = sqlx::query_as!(Item, "SELECT id, name FROM items;")
+    let fuzzy_matches = sqlx::query_as!(Item, "SELECT id, strid, name FROM items;")
         .fetch_all(&mut *connection)
         .await?
         .into_iter();
@@ -65,7 +66,7 @@ pub(crate) async fn get_item_by_id(
     connection: &mut SqliteConnection,
     id: i64,
 ) -> anyhow::Result<Option<Item>> {
-    let item = sqlx::query_as!(Item, "SELECT id, name FROM items WHERE id = ?", id)
+    let item = sqlx::query_as!(Item, "SELECT id, strid, name FROM items WHERE id = ?", id)
         .fetch_optional(&mut *connection)
         .await?;
     Ok(item)
@@ -193,7 +194,7 @@ pub(crate) async fn get_items_by_owner(
     let connection = pool.acquire().await?;
     let items = sqlx::query_as!(
         Item,
-        "SELECT i.id, i.name
+        "SELECT i.id, i.strid, i.name
         FROM borrow b
         JOIN (
             SELECT item_id, MAX(ordering) AS max_ordering
@@ -273,7 +274,7 @@ pub(crate) async fn box_all(
 
         if let Some(prior_parent) =
             sqlx::query_as!(Item,
-            "SELECT i.id, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
+            "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
             item.id
         )
             .fetch_optional(&mut *connection)
@@ -491,7 +492,7 @@ pub(crate) async fn box_contents(
     open_set.push_back(&mut root);
     while let Some(tree) = open_set.pop_front() {
         let children = sqlx::query!(
-            "SELECT i.id, i.name, m.present
+            "SELECT i.id, i.name, i.strid, m.present
                 FROM meta m
                 JOIN items i ON m.child = i.id
                 WHERE m.parent = ?",
@@ -504,6 +505,7 @@ pub(crate) async fn box_contents(
             ItemTree::new(
                 Item {
                     id: item.id,
+                    strid: item.strid,
                     name: item.name,
                 },
                 item.present,
@@ -523,7 +525,7 @@ pub async fn get_items(
     let roots = if let Some(user) = user {
         sqlx::query_as!(
             Item,
-            "SELECT i.id, i.name
+            "SELECT i.id, i.strid, i.name
             FROM borrow b
             JOIN (
                 SELECT item_id, MAX(ordering) AS max_ordering
@@ -541,7 +543,7 @@ pub async fn get_items(
     } else {
         sqlx::query_as!(
             Item,
-            "SELECT id, name FROM items
+            "SELECT id, strid, name FROM items
              LEFT JOIN meta ON meta.child = id WHERE meta.parent IS NULL;"
         )
         .fetch_all(&mut *single_conn)
@@ -555,4 +557,14 @@ pub async fn get_items(
     }
 
     Ok(trees)
+}
+
+/// Delete the given item, return a tree containing the previous children which are now orphans
+pub async fn delete_item(connection: &mut SqliteConnection, item: &Item) -> anyhow::Result<ItemTree> {
+    let tree = box_contents(connection, item).await?;
+
+    sqlx::query!("DELETE FROM items WHERE id = ?;", item.id)
+        .execute(&mut *connection)
+        .await?;
+    Ok(tree)
 }

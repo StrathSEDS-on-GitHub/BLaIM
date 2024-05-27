@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT i.id, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
+  "query": "SELECT id, strid, name FROM items WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -9,8 +9,13 @@
         "type_info": "Int64"
       },
       {
-        "name": "name",
+        "name": "strid",
         "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
         "type_info": "Text"
       }
     ],
@@ -19,8 +24,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "3c6f09bca4666454a6b952b10849cb84aed50ad615179a1fd22aa1904bb83105"
+  "hash": "ea6b9a5fd0bb3020264329076358ade5757f9a302a4d8a28b7a5ae91f15f59c5"
 }
