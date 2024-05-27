@@ -356,7 +356,7 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
             .into_iter()
             .map(|it| {
                 it.into_iter_depth_first()
-                    .filter(|(_, item, _)| item.present)
+                    .filter(|(_, item, _)| user.is_none() || item.present) // Include not present items if user is not specified
                     .collect::<ItemTree>()
                     .to_string()
             })
