@@ -109,6 +109,8 @@ pub(crate) async fn borrow_item(
         .iter()
         .map(|i| i.id)
         .collect::<Vec<_>>();
+
+    // Mark items as present if the parent is owned by the borrower
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
         let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent IN (");
         let mut sep = builder.separated(",");
@@ -125,15 +127,7 @@ pub(crate) async fn borrow_item(
         });
         builder.push(")) RETURNING parent, present;");
 
-        let mut query = builder.build();
-
-        for i in owned_items.iter() {
-            query = query.bind(i);
-        }
-        for i in owned_items.iter() {
-            query = query.bind(i);
-        }
-
+        let query = builder.build();
         let result = query.fetch_optional(&mut *connection).await?;
 
         if let Some(row) = result {
@@ -141,6 +135,37 @@ pub(crate) async fn borrow_item(
             let box_item = get_item_by_id(connection, parent).await?.unwrap();
             let present = row.get(1);
             present_updates.push((box_item, node.item.clone(), present));
+        }
+    }
+
+    // Mark items owned by the borrower as present if the parent is being borrowed
+    for owned_item in owned_items.iter() {
+        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = 1 ");
+        builder
+            .push("WHERE child = ")
+            .push_bind(owned_item)
+            .push(" AND (parent IN (");
+        let mut sep = builder.separated(",");
+        items
+            .iter_depth_first()
+            .filter(|(_, node, _)| node.present)
+            .for_each(|(_, node, _)| {
+                sep.push_bind(node.item.id);
+            });
+        builder.push(")) AND present = 0 RETURNING parent, present;");
+
+        let query = builder.build();
+        let result = query.fetch_optional(&mut *connection).await?;
+
+        if let Some(row) = result {
+            let parent: i64 = row.get(0);
+            let box_item = get_item_by_id(connection, parent).await?.unwrap();
+            let present = row.get(1);
+            present_updates.push((
+                box_item,
+                get_item_by_id(connection, *owned_item).await?.unwrap(),
+                present,
+            ));
         }
     }
 
@@ -560,7 +585,10 @@ pub async fn get_items(
 }
 
 /// Delete the given item, return a tree containing the previous children which are now orphans
-pub async fn delete_item(connection: &mut SqliteConnection, item: &Item) -> anyhow::Result<ItemTree> {
+pub async fn delete_item(
+    connection: &mut SqliteConnection,
+    item: &Item,
+) -> anyhow::Result<ItemTree> {
     let tree = box_contents(connection, item).await?;
 
     sqlx::query!("DELETE FROM items WHERE id = ?;", item.id)

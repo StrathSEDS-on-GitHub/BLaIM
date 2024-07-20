@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.83"
+anyhow = {version="1.0.83", features=["backtrace"]}
 chrono = "0.4.38"
 color-eyre = "0.6.3"
 fuzzy-matcher = "0.3.7"
