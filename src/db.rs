@@ -14,7 +14,7 @@ pub struct Item {
     pub strid: String,
 }
 
-fn fuzzy_search<'b, T>(
+fn fuzzy_search<'b, T: std::fmt::Debug>(
     needle: &'b str,
     haystack: impl Iterator<Item = T> + 'b,
     key: impl Fn(&T) -> &str,
@@ -24,7 +24,7 @@ fn fuzzy_search<'b, T>(
     let mut scores: Vec<_> = haystack
         .filter_map(|s| MATCHER.fuzzy_match(key(&s), needle).map(|score| (score, s)))
         .collect();
-    scores.sort_by_key(|(score, _)| *score);
+    scores.sort_by_key(|(score, _)| -*score);
     scores.splice(scores.len().min(5).., []);
     scores
 }
