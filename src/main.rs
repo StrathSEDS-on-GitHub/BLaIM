@@ -1,9 +1,7 @@
-#![feature(lazy_cell)]
 #![feature(iter_partition_in_place)]
 #![feature(iter_intersperse)]
 #![feature(let_chains)]
 #![feature(closure_lifetime_binder)]
-#![feature(async_closure)]
 
 use std::env;
 use std::future::Future;
@@ -30,7 +28,7 @@ struct Data {
 type Error = anyhow::Error;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420, 1138724351613599804];
+const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
 
 async fn autocomplete_item<'a>(
     ctx: Context<'_>,
@@ -1002,14 +1000,17 @@ async fn main() -> color_eyre::Result<()> {
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
+            println!("{} is ready!", _ready.user.name);
             Box::pin(async move {
                 for guild_id in ALLOWED_GUILDS {
+                    print!("Registering in guild {}..", guild_id);
                     poise::builtins::register_in_guild(
                         ctx,
                         &framework.options().commands,
                         GuildId::from(*guild_id),
                     )
                     .await?;
+                    println!(" ok");
                 }
                 Ok(Data { pool })
             })
