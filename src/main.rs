@@ -505,13 +505,14 @@ async fn blame(
     Ok(())
 }
 
+///Move an item into a storage location
 #[poise::command(slash_command)]
 async fn store(
     ctx: Context<'_>,
-    #[autocomplete = autocomplete_store] location: String,
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item: String,
+    #[autocomplete = autocomplete_store] location: Option<String>,
 ) -> Result<(), Error> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
@@ -524,6 +525,8 @@ async fn store(
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
     let items = db::lookup_item(&mut *transaction, &item).await?;
+
+    let location = location.unwrap_or("jw9".to_string());
 
     let selected = match items.first() {
         Some(selected) => selected,
@@ -770,7 +773,7 @@ async fn item(_ctx: Context<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Registers an item in the database
+/// Register an item in the database
 #[poise::command(slash_command, rename = "register")]
 async fn item_register(
     ctx: Context<'_>,
@@ -791,7 +794,7 @@ async fn item_register(
     Ok(())
 }
 
-/// Deletes an item from the database
+/// Delete an item from the database
 #[poise::command(slash_command, rename = "delete")]
 async fn item_delete(
     ctx: Context<'_>,
