@@ -1,11 +1,13 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use sqlx::{Acquire, Row, SqliteConnection};
+use sqlx::{Acquire, Row, SqliteConnection, SqlitePool};
+
+use crate::format_owner;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
@@ -610,12 +612,13 @@ pub(crate) async fn box_contents(
     Ok(root)
 }
 
-pub async fn get_items(
+pub async fn get_itemtrees(
     connection: &mut SqliteConnection,
-    user: Option<String>,
+    user: Option<impl AsRef<str>>,
 ) -> anyhow::Result<Vec<ItemTree>> {
     let single_conn = connection.acquire().await?;
     let roots = if let Some(user) = user {
+        let s = user.as_ref();
         sqlx::query_as!(
             Item,
             "SELECT i.id, i.strid, i.name
@@ -629,7 +632,7 @@ pub async fn get_items(
             LEFT JOIN meta m ON b.item_id = m.child
             JOIN items i ON b.item_id = i.id
             WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND (m.parent IS NULL OR m.present IS FALSE);",
-            user
+            s
         )
         .fetch_all(&mut *single_conn)
         .await?
@@ -663,4 +666,32 @@ pub async fn delete_item(
         .execute(&mut *connection)
         .await?;
     Ok(tree)
+}
+
+pub(crate) async fn list_storage(
+    pool: &SqlitePool,
+    location: Option<String>,
+) -> anyhow::Result<HashMap<String, Vec<ItemTree>>> {
+    let locations = if let Some(strid) = location {
+        let name = format_owner(&mut *pool.acquire().await?, &format!("loc:{strid}")).await;
+        vec![(strid, name)]
+    } else {
+        sqlx::query_as("SELECT strid, name FROM storage;")
+            .fetch_all(&mut *pool.acquire().await?)
+            .await?
+            .into_iter()
+            .collect()
+    };
+
+    let mut itemtrees: HashMap<String, Vec<ItemTree>> = HashMap::new();
+    for (strid, name) in locations {
+        let trees = get_itemtrees(
+            &mut *pool.acquire().await?,
+            Some(&format!("loc:{strid}")),
+        )
+        .await?;
+        itemtrees.insert(name, trees);
+    }
+
+    Ok(itemtrees)
 }

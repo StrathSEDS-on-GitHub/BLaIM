@@ -385,7 +385,8 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
         return Ok(());
     }
     let mut connection = ctx.data().pool.acquire().await?;
-    let items = db::get_items(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
+    let items =
+        db::get_itemtrees(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
     let mut message = "```".to_string()
         + &items
             .into_iter()
@@ -499,6 +500,48 @@ async fn blame(
             .field(format!("{}To", "\x7f ".repeat(12)), to_column, true)
             .field("Time", time_column, true);
     }
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
+
+    Ok(())
+}
+
+/// Show the contents of storage locations
+#[poise::command(slash_command)]
+async fn storage(
+    ctx: Context<'_>,
+    #[autocomplete = autocomplete_store] location: Option<String>,
+) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+
+    let items = db::list_storage(&ctx.data().pool, location.clone()).await?;
+
+    let embed = CreateEmbed::new()
+        .title("📦 Storage contents")
+        .fields(items.iter().map(|(location, trees)| {
+            (
+                format!("📍 **{}**\n", location),
+                if trees.is_empty() {
+                    "Nothing to see here".to_string()
+                } else {
+                    format!(
+                        "```\n{}```",
+                        trees
+                            .iter()
+                            .map(|it| it.to_string())
+                            .fold(String::new(), |acc, it| acc + &it + "\n")
+                    )
+                },
+                false,
+            )
+        }));
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -1182,7 +1225,16 @@ async fn main() -> color_eyre::Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![borrow(), blame(), give(), item(), r#box(), items(), store()],
+            commands: vec![
+                borrow(),
+                blame(),
+                give(),
+                item(),
+                r#box(),
+                items(),
+                store(),
+                storage(),
+            ],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
