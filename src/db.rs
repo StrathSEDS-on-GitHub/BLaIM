@@ -14,6 +14,13 @@ pub struct Item {
     pub strid: String,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Location {
+    pub id: i64,
+    pub name: String,
+    pub strid: String,
+}
+
 fn fuzzy_search<'b, T: std::fmt::Debug>(
     needle: &'b str,
     haystack: impl Iterator<Item = T> + 'b,
@@ -27,6 +34,39 @@ fn fuzzy_search<'b, T: std::fmt::Debug>(
     scores.sort_by_key(|(score, _)| -*score);
     scores.splice(scores.len().min(5).., []);
     scores
+}
+
+pub(crate) async fn lookup_storage(
+    connection: &mut SqliteConnection,
+    location: &str,
+) -> anyhow::Result<Vec<Location>> {
+    let item = location.to_lowercase();
+    let exact_matches: Vec<_> = sqlx::query_as!(
+        Location,
+        "SELECT id, strid, name FROM storage WHERE strid = ? OR name = ?",
+        item,
+        item
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+
+    let fuzzy_matches = sqlx::query_as!(Location, "SELECT id, strid, name FROM storage;")
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter();
+
+    let results = fuzzy_search(&item, fuzzy_matches, |i| &i.name)
+        .into_iter()
+        .filter_map(|(_, location)| {
+            if !exact_matches.contains(&location) {
+                Some(location)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(exact_matches.into_iter().chain(results).collect())
 }
 
 pub(crate) async fn lookup_item(
@@ -358,6 +398,34 @@ impl From<sqlx::Error> for UnboxingError {
     fn from(err: sqlx::Error) -> Self {
         Self::Other(err.into())
     }
+}
+
+pub(crate) async fn parent_box(
+    connection: &mut SqliteConnection,
+    item: &Item,
+) -> anyhow::Result<Option<Item>> {
+    let parent = sqlx::query_as!(
+        Item,
+        "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
+        item.id
+    )
+    .fetch_optional(&mut *connection)
+    .await?;
+    Ok(parent)
+}
+
+pub(crate) async fn find_location_name(
+    connection: &mut SqliteConnection,
+    strid: &str,
+) -> anyhow::Result<Option<Location>> {
+    let location = sqlx::query_as!(
+        Location,
+        "SELECT id, strid, name FROM storage WHERE strid = ?",
+        strid
+    )
+    .fetch_optional(&mut *connection)
+    .await?;
+    Ok(location)
 }
 
 pub(crate) async fn unbox_all(

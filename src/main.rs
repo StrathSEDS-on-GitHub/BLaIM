@@ -49,19 +49,55 @@ async fn autocomplete_item<'a>(
     }
 }
 
+async fn format_owner(connection: &mut SqliteConnection, owner: &str) -> String {
+    if let Some(owner) = owner.strip_prefix("loc:") {
+        format!(
+            "{}",
+            db::find_location_name(connection, owner)
+                .await
+                .unwrap()
+                .unwrap()
+                .name
+        )
+    } else {
+        format!("<@{}>", owner)
+    }
+}
+
+async fn autocomplete_store<'a>(
+    ctx: Context<'_>,
+    partial: &'a str,
+) -> Box<dyn Iterator<Item = String> + Send + 'a> {
+    let conn = &mut ctx.data().pool.acquire().await;
+    if let Ok(conn) = conn {
+        let conn = conn as &mut SqliteConnection;
+        Box::new(
+            db::lookup_storage(conn, partial)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item| item.name),
+        )
+    } else {
+        Box::new([].into_iter())
+    }
+}
+
 async fn make_embed(
+    transaction: &mut SqliteConnection,
     selected: &db::Item,
     from: &Option<String>,
     to: &str,
     alternatives: &[db::Item],
     (updated_items, present_updates): &(ItemTree, Vec<(db::Item, db::Item, bool)>),
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
-    let previous_owner = from
-        .as_ref()
-        .map(|f| format!("<@{}>", f))
-        .unwrap_or("No one 👻".to_string());
+    let previous_owner = if let Some(ref owner) = from {
+        format_owner(transaction, owner).await
+    } else {
+        "👻 No one".to_string()
+    };
 
-    let new_owner = format!("<@{}>", to);
+    let new_owner = format_owner(&mut *transaction, to).await;
 
     let mut embed = CreateEmbed::new()
         .title(format!(
@@ -295,6 +331,7 @@ async fn borrow(
                 .collect::<Vec<_>>();
             let results = db::borrow_item(&mut *connection, selected, &state.author_id).await?;
             let (embed, components) = make_embed(
+                connection,
                 &selected,
                 &state.previous_owner,
                 &state.author_id,
@@ -416,29 +453,39 @@ async fn blame(
         return Ok(());
     }
 
-    let borrowers = history
-        .iter()
-        .map(|(borrower, _)| format!("<@{}>\n", borrower));
+    let mut borrowers = Vec::new();
+    for (borrower, _) in &history {
+        borrowers.push(format_owner(&mut *connection, borrower).await + "\n")
+    }
+    let borrowers = borrowers.into_iter();
+
+    let parent_box = db::parent_box(&mut *connection, item).await?;
 
     let mut embed = CreateEmbed::new()
         .title(format!("Borrow history for {}", item.name))
         .field(
             ":green_square: Current holder",
             format!(
-                "<@{}> since <t:{}:R>",
-                history.first().unwrap().0,
+                "{} since <t:{}:R>",
+                format_owner(&mut *connection, &history.first().unwrap().0).await,
                 history.first().unwrap().1.timestamp()
             ),
             true,
         )
         .field("🆔 Identifier", &item.strid, true)
-        .field("", "", true);
+        .field(
+            "📦 Parent box",
+            parent_box.map_or("Not in a box".to_owned(), |it| it.name),
+            true,
+        );
+
     if borrowers.len() > 1 {
         let from_column: String = borrowers
             .clone()
             .skip(1)
             .chain(std::iter::once("👻".to_string()))
             .collect();
+        println!("from_col: {:?}", from_column.clone());
         let to_column: String = borrowers
             .clone()
             .map(|x| format!(":right_arrow:{}{}", "\x7f ".repeat(6), x))
@@ -458,11 +505,148 @@ async fn blame(
     Ok(())
 }
 
+#[poise::command(slash_command)]
+async fn store(
+    ctx: Context<'_>,
+    #[autocomplete = autocomplete_store] location: String,
+    #[description = "Item"]
+    #[autocomplete = autocomplete_item]
+    item: String,
+) -> Result<(), Error> {
+    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+        let embed = CreateEmbed::new()
+            .title("Not allowed")
+            .description("You are not allowed to use this command in this server.");
+
+        ctx.send(CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+    let mut connection = ctx.data().pool.acquire().await?;
+    let mut transaction = connection.begin().await?;
+    let items = db::lookup_item(&mut *transaction, &item).await?;
+
+    let selected = match items.first() {
+        Some(selected) => selected,
+        None => {
+            let embed = CreateEmbed::new()
+                .title("No items found")
+                .description("No items found with that name. Please try again.");
+
+            let reply = CreateReply::default().embed(embed);
+
+            ctx.send(reply).await?;
+            return Ok(());
+        }
+    };
+
+    let Some(location) = db::lookup_storage(&mut *transaction, &location)
+        .await?
+        .into_iter()
+        .next()
+    else {
+        let embed = CreateEmbed::new()
+            .title("No storage found")
+            .description("No storage found with that name. Please try again.");
+
+        let reply = CreateReply::default().embed(embed);
+
+        ctx.send(reply).await?;
+        return Ok(());
+    };
+
+    let owner = db::get_last_holder(&mut *transaction, selected.id).await?;
+
+    if let Some(ref owner) = owner
+        && owner != &ctx.author().id.to_string()
+    {
+        let embed = CreateEmbed::new()
+            .title("You don't own this item")
+            .description(format!("This item is currently owned by <@{}>", owner));
+
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    }
+
+    if let Some(ref owner) = owner
+        && owner.strip_prefix("loc:").unwrap_or(owner) == &location.strid
+    {
+        let embed = CreateEmbed::new()
+            .title(format!("This item is already in {}", location.name))
+            .image("https://i.kym-cdn.com/entries/icons/original/000/023/397/C-658VsXoAo3ovC.jpg");
+
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    }
+
+    struct State {
+        previous_owner: Option<String>,
+        items: Vec<db::Item>,
+        location: String,
+    }
+
+    let task = for<'a> |state: &'a State,
+                        connection: &'a mut SqliteConnection,
+                        item_id: i64|
+             -> Pin<
+        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
+            let alternatives = state
+                .items
+                .iter()
+                .filter(|it| it.id != item_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let results = db::borrow_item(&mut *connection, selected, &state.location).await?;
+            let (embed, components) = make_embed(
+                &mut *connection,
+                &selected,
+                &state.previous_owner,
+                &state.location,
+                &alternatives,
+                &results,
+            )
+            .await;
+            Ok((embed, components))
+        })
+    };
+
+    let state = State {
+        previous_owner: owner,
+        items: items.clone(),
+        location: format!("loc:{}", location.strid),
+    };
+
+    let (embed, components) = task(&state, &mut *transaction, selected.id).await?;
+    let reply = CreateReply::default()
+        .embed(embed.clone())
+        .components(components);
+
+    let handle = ctx.send(reply).await?;
+
+    let mut redo_conn = ctx.data().pool.acquire().await?;
+
+    handle_edits(
+        ctx,
+        state,
+        &handle,
+        task,
+        embed,
+        &mut redo_conn,
+        transaction,
+    )
+    .await?;
+
+    Ok(())
+}
 /// Gives ownership of an item to another user
 #[poise::command(slash_command)]
 async fn give(
     ctx: Context<'_>,
-    #[description = "User"] user: User,
+    user: User,
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item: String,
@@ -541,6 +725,7 @@ async fn give(
                 .collect::<Vec<_>>();
             let results = db::borrow_item(&mut *connection, selected, &state.user_id).await?;
             let (embed, components) = make_embed(
+                &mut *connection,
                 &selected,
                 &state.previous_owner,
                 &state.user_id,
@@ -580,10 +765,7 @@ async fn give(
     Ok(())
 }
 
-#[poise::command(
-    slash_command,
-    subcommands("item_register", "item_delete")
-)]
+#[poise::command(slash_command, subcommands("item_register", "item_delete"))]
 async fn item(_ctx: Context<'_>) -> anyhow::Result<()> {
     Ok(())
 }
@@ -696,8 +878,7 @@ async fn item_delete(
             if orphan_count > 0 {
                 desc.push_str(&format!(
                     " **{}** items have been orphaned.\n```\n{}\n```",
-                    orphan_count,
-                    orphans
+                    orphan_count, orphans
                 ));
             }
 
@@ -708,7 +889,9 @@ async fn item_delete(
         })
     };
 
-    struct State { items: Vec<db::Item> }
+    struct State {
+        items: Vec<db::Item>,
+    }
     let state = State {
         items: items.clone(),
     };
@@ -996,7 +1179,7 @@ async fn main() -> color_eyre::Result<()> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![borrow(), blame(), give(), item(), r#box(), items()],
+            commands: vec![borrow(), blame(), give(), item(), r#box(), items(), store()],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
