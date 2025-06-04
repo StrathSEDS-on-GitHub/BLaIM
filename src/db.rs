@@ -612,15 +612,45 @@ pub(crate) async fn box_contents(
     Ok(root)
 }
 
+pub async fn get_all_itemtrees(
+    connection: &mut SqliteConnection,
+) -> anyhow::Result<HashMap<Option<String>, Vec<ItemTree>>> {
+    let single_conn = connection.acquire().await?;
+    let roots: Vec<(Option<String>, i64, String, String)> = sqlx::query_as(
+            "SELECT b.to_user, i.id, i.strid, i.name
+            FROM borrow b
+            JOIN (
+                SELECT item_id, MAX(ordering) AS max_ordering
+                FROM borrow GROUP BY item_id
+            ) AS max_orders
+            ON b.item_id = max_orders.item_id 
+            LEFT JOIN meta m ON b.item_id = m.child
+            RIGHT JOIN items i ON b.item_id = i.id
+            WHERE (b.ordering = max_orders.max_ordering 
+                OR max_orders.max_ordering IS NULL) 
+                AND (m.parent IS NULL OR m.present IS FALSE);"
+        )
+        .fetch_all(&mut *single_conn)
+        .await?;
+    let mut trees = HashMap::new();
+    for (owner, id, strid, name) in roots {
+        let tree = box_contents(&mut *single_conn, &Item { id, strid, name }).await?;
+        trees
+            .entry(owner)
+            .or_insert(Vec::new())
+            .push(tree);
+    }
+
+    Ok(trees)
+}
 pub async fn get_itemtrees(
     connection: &mut SqliteConnection,
-    user: Option<impl AsRef<str>>,
+    user: impl AsRef<str>,
 ) -> anyhow::Result<Vec<ItemTree>> {
     let single_conn = connection.acquire().await?;
-    let roots = if let Some(user) = user {
-        let s = user.as_ref();
-        sqlx::query_as!(
-            Item,
+    let user = user.as_ref();
+    let roots = sqlx::query_as!(
+        Item,
             "SELECT i.id, i.strid, i.name
             FROM borrow b
             JOIN (
@@ -631,24 +661,15 @@ pub async fn get_itemtrees(
             ON b.item_id = max_orders.item_id 
             LEFT JOIN meta m ON b.item_id = m.child
             JOIN items i ON b.item_id = i.id
-            WHERE b.ordering = max_orders.max_ordering AND b.to_user = ? AND (m.parent IS NULL OR m.present IS FALSE);",
-            s
-        )
-        .fetch_all(&mut *single_conn)
-        .await?
-    } else {
-        sqlx::query_as!(
-            Item,
-            "SELECT id, strid, name FROM items
-             LEFT JOIN meta ON meta.child = id WHERE meta.parent IS NULL;"
-        )
-        .fetch_all(&mut *single_conn)
-        .await?
-    };
+            WHERE b.ordering = max_orders.max_ordering AND (m.parent IS NULL OR m.present IS FALSE) AND b.to_user = ?;", 
+            user
+    )
+    .fetch_all(&mut *single_conn)
+    .await?;
 
     let mut trees = Vec::new();
-    for root in &roots {
-        let tree = box_contents(&mut *single_conn, &root).await?;
+    for item in roots {
+        let tree = box_contents(&mut *single_conn, &item).await?;
         trees.push(tree);
     }
 
@@ -685,11 +706,7 @@ pub(crate) async fn list_storage(
 
     let mut itemtrees: HashMap<String, Vec<ItemTree>> = HashMap::new();
     for (strid, name) in locations {
-        let trees = get_itemtrees(
-            &mut *pool.acquire().await?,
-            Some(&format!("loc:{strid}")),
-        )
-        .await?;
+        let trees = get_itemtrees(&mut *pool.acquire().await?, format!("loc:{strid}")).await?;
         itemtrees.insert(name, trees);
     }
 

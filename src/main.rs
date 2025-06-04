@@ -385,25 +385,47 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
         return Ok(());
     }
     let mut connection = ctx.data().pool.acquire().await?;
-    let items =
-        db::get_itemtrees(&mut *connection, user.as_ref().map(|it| it.id.to_string())).await?;
-    let mut message = "```".to_string()
-        + &items
-            .into_iter()
-            .map(|it| {
-                it.into_iter_depth_first()
-                    .filter(|(_, item, _)| user.is_none() || item.present) // Include not present items if user is not specified
-                    .collect::<ItemTree>()
-                    .to_string()
+    let embed = if let Some(ref user) = user {
+        let items = db::get_itemtrees(&mut *connection, user.id.to_string()).await?;
+        let message = "```".to_string()
+            + &items
+                .into_iter()
+                .map(|it| {
+                    it.into_iter_depth_first()
+                        .filter(|(_, item, _)| item.present) // Include not present items if user is not specified
+                        .collect::<ItemTree>()
+                        .to_string()
+                })
+                .collect::<String>()
+            + "```";
+        CreateEmbed::new()
+            .title(format!("📦 Items held by {}", user.name))
+            .description(message)
+    } else {
+        let items = db::get_all_itemtrees(&mut *connection).await?;
+        let description = try_join_all(items.iter().map(async |(owner, trees)| {
+            Ok::<_, anyhow::Error>(if trees.is_empty() {
+                "Nothing to see here".to_string()
+            } else {
+                format!(
+                    "\n### 📦 **{}**\n```\n{}```",
+                    if let Some(owner) = owner {
+                        format_owner(&mut *ctx.data().pool.acquire().await?, owner).await
+                    } else {
+                        "No one :ghost:".to_string()
+                    },
+                    trees
+                        .iter()
+                        .map(|it| it.to_string())
+                        .fold(String::new(), |acc, it| acc + &it)
+                )
             })
-            .collect::<String>()
-        + "```";
-    if let Some(user) = &user {
-        message.insert_str(0, &format!("Items held by <@{}>\n", user.id))
-    }
-    let embed = CreateEmbed::new()
-        .title(user.map_or_else(|| "All items".to_string(), |_| "Items".to_string()))
-        .description(message);
+        }))
+        .await?;
+        CreateEmbed::new()
+            .title(":wrench: Items")
+            .description(description.concat())
+    };
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -520,6 +542,26 @@ async fn storage(
         ctx.send(CreateReply::default().embed(embed)).await?;
         return Ok(());
     }
+
+    let location = if let Some(location) = location {
+        let Some(location) = db::lookup_storage(&mut *ctx.data().pool.acquire().await?, &location)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| item.strid)
+            .next()
+        else {
+            let embed = CreateEmbed::new()
+                .title("No storage found")
+                .description("No storage found with that name. Please try again.");
+            let reply = CreateReply::default().embed(embed);
+            ctx.send(reply).await?;
+            return Ok(());
+        };
+        Some(location)
+    } else {
+        None
+    };
 
     let items = db::list_storage(&ctx.data().pool, location.clone()).await?;
 
