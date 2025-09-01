@@ -25,3 +25,7 @@ It's also possible to split out items from the parent box by borrowing just the 
 
 #### so advanced it's cursed
 the boxes are recursive. do what you will with this information
+
+### development
+
+Simply push to remote ssh://seds@138.68.134.118:/home/seds/blaim/blaim.git and the bot will automatically update and restart. Ensure you copy target/release/blaim to the repository root.
