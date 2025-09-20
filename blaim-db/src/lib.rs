@@ -5,18 +5,18 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
-use sqlx::{Acquire, Row, SqliteConnection, SqlitePool};
+use sqlx::{Acquire, Row, PgConnection, PgPool};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
-    pub id: i64,
+    pub id: i32,
     pub name: String,
     pub strid: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Location {
-    pub id: i64,
+    pub id: i32,
     pub name: String,
     pub strid: String,
 }
@@ -37,13 +37,13 @@ fn fuzzy_search<'b, T: std::fmt::Debug>(
 }
 
 pub async fn lookup_storage(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     location: &str,
 ) -> color_eyre::Result<Vec<Location>> {
     let item = location.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Location,
-        "SELECT id, strid, name FROM storage WHERE strid = ? OR name = ?",
+        "SELECT id, strid, name FROM storage WHERE strid = $1 OR name = $2",
         item,
         item
     )
@@ -70,13 +70,13 @@ pub async fn lookup_storage(
 }
 
 pub async fn lookup_item(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     item: &str,
 ) -> color_eyre::Result<Vec<Item>> {
     let item = item.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Item,
-        "SELECT id, strid, name FROM items WHERE strid = ? OR name = ?",
+        "SELECT id, strid, name FROM items WHERE strid = $1 OR name = $2",
         item,
         item
     )
@@ -103,21 +103,21 @@ pub async fn lookup_item(
 }
 
 pub async fn get_item_by_id(
-    connection: &mut SqliteConnection,
-    id: i64,
+    connection: &mut PgConnection,
+    id: i32,
 ) -> color_eyre::Result<Option<Item>> {
-    let item = sqlx::query_as!(Item, "SELECT id, strid, name FROM items WHERE id = ?", id)
+    let item = sqlx::query_as!(Item, "SELECT id, strid, name FROM items WHERE id = $1", id)
         .fetch_optional(&mut *connection)
         .await?;
     Ok(item)
 }
 
 pub async fn get_last_holder(
-    connection: &mut SqliteConnection,
-    item_id: i64,
+    connection: &mut PgConnection,
+    item_id: i32,
 ) -> color_eyre::Result<Option<String>> {
     let holder = sqlx::query!(
-        "SELECT to_user FROM borrow WHERE item_id = ? ORDER BY ordering DESC LIMIT 1",
+        "SELECT to_user FROM borrow WHERE item_id = $1 ORDER BY ordering DESC LIMIT 1",
         item_id
     )
     .fetch_optional(&mut *connection)
@@ -126,15 +126,15 @@ pub async fn get_last_holder(
 }
 
 pub async fn borrow_item(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     item: &Item,
     user: &str,
 ) -> color_eyre::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
-    let now = sqlx::types::chrono::Utc::now();
+    let now = sqlx::types::chrono::Utc::now().naive_utc();
     let items = box_contents(connection, item).await?;
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
         sqlx::query!(
-            "INSERT INTO borrow (item_id, to_user, time) VALUES (?, ?, ?);",
+            "INSERT INTO borrow (item_id, to_user, time) VALUES ($1, $2, $3);",
             node.item.id,
             user,
             now,
@@ -171,7 +171,7 @@ pub async fn borrow_item(
         let result = query.fetch_optional(&mut *connection).await?;
 
         if let Some(row) = result {
-            let parent: i64 = row.get(0);
+            let parent: i32 = row.get(0);
             let box_item = get_item_by_id(connection, parent).await?.unwrap();
             let present = row.get(1);
             present_updates.push((box_item, node.item.clone(), present));
@@ -198,7 +198,7 @@ pub async fn borrow_item(
         let result = query.fetch_optional(&mut *connection).await?;
 
         if let Some(row) = result {
-            let parent: i64 = row.get(0);
+            let parent: i32 = row.get(0);
             let box_item = get_item_by_id(connection, parent).await?.unwrap();
             let present = row.get(1);
             present_updates.push((
@@ -217,11 +217,11 @@ pub async fn borrow_item(
 }
 
 pub async fn borrow_history(
-    connection: &mut SqliteConnection,
-    item_id: i64,
+    connection: &mut PgConnection,
+    item_id: i32,
 ) -> color_eyre::Result<Vec<(String, DateTime<Utc>)>> {
     let history = sqlx::query!(
-        "SELECT to_user, time FROM borrow WHERE item_id = ? ORDER BY ordering DESC",
+        "SELECT to_user, time FROM borrow WHERE item_id = $1 ORDER BY ordering DESC",
         item_id
     )
     .fetch_all(&mut *connection)
@@ -238,12 +238,12 @@ pub async fn borrow_history(
 }
 
 pub async fn register_item(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     strid: &str,
     name: &str,
 ) -> color_eyre::Result<()> {
     sqlx::query!(
-        "INSERT INTO items (strid, name) VALUES (?, ?);",
+        "INSERT INTO items (strid, name) VALUES ($1, $2);",
         strid,
         name,
     )
@@ -253,7 +253,7 @@ pub async fn register_item(
 }
 
 pub async fn get_items_by_owner(
-    pool: &mut SqliteConnection,
+    pool: &mut PgConnection,
     owner: &str,
 ) -> color_eyre::Result<Vec<Item>> {
     let connection = pool.acquire().await?;
@@ -268,7 +268,7 @@ pub async fn get_items_by_owner(
         ) AS max_orders
         ON b.item_id = max_orders.item_id 
         JOIN items i ON b.item_id = i.id
-        WHERE b.ordering = max_orders.max_ordering AND b.to_user = ?;",
+        WHERE b.ordering = max_orders.max_ordering AND b.to_user = $1;",
         owner
     )
     .fetch_all(&mut *connection)
@@ -323,7 +323,7 @@ impl std::error::Error for BoxingError {
 }
 
 pub async fn box_all(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     owner: &str,
     r#box: &Item,
     items: &[Item],
@@ -339,7 +339,7 @@ pub async fn box_all(
 
         if let Some(prior_parent) =
             sqlx::query_as!(Item,
-            "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
+            "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = $1",
             item.id
         )
             .fetch_optional(&mut *connection)
@@ -356,7 +356,7 @@ pub async fn box_all(
     for item in items {
         let owned = owned_items.iter().any(|i| i.id == item.id);
         sqlx::query!(
-            "INSERT INTO meta (parent, child, present) VALUES (?, ?, ?);",
+            "INSERT INTO meta (parent, child, present) VALUES ($1, $2, $3);",
             r#box.id,
             item.id,
             owned,
@@ -401,12 +401,12 @@ impl From<sqlx::Error> for UnboxingError {
 }
 
 pub async fn parent_box(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     item: &Item,
 ) -> color_eyre::Result<Option<Item>> {
     let parent = sqlx::query_as!(
         Item,
-        "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
+        "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = $1",
         item.id
     )
     .fetch_optional(&mut *connection)
@@ -415,12 +415,12 @@ pub async fn parent_box(
 }
 
 pub async fn find_location_name(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     strid: &str,
 ) -> color_eyre::Result<Option<Location>> {
     let location = sqlx::query_as!(
         Location,
-        "SELECT id, strid, name FROM storage WHERE strid = ?",
+        "SELECT id, strid, name FROM storage WHERE strid = $1",
         strid
     )
     .fetch_optional(&mut *connection)
@@ -429,13 +429,13 @@ pub async fn find_location_name(
 }
 
 pub async fn unbox_all(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     r#box: &Item,
     items: &[Item],
 ) -> Result<(), UnboxingError> {
     for item in items {
         if let None = sqlx::query!(
-            "DELETE FROM meta WHERE child = ? AND parent = ? RETURNING child;",
+            "DELETE FROM meta WHERE child = $1 AND parent = $2 RETURNING child;",
             item.id,
             r#box.id,
         )
@@ -481,7 +481,7 @@ impl ItemTree {
         self.children[start..].iter_mut()
     }
 
-    fn find(&self, id: i64) -> Option<&ItemTree> {
+    fn find(&self, id: i32) -> Option<&ItemTree> {
         if self.item.item.id == id {
             return Some(self);
         }
@@ -577,7 +577,7 @@ impl FromIterator<(usize, ItemTreeNode, bool)> for ItemTree {
 }
 
 pub async fn box_contents(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     r#box: &Item,
 ) -> color_eyre::Result<ItemTree> {
     let mut root = ItemTree::new(r#box.clone(), true);
@@ -588,7 +588,7 @@ pub async fn box_contents(
             "SELECT i.id, i.name, i.strid, m.present
                 FROM meta m
                 JOIN items i ON m.child = i.id
-                WHERE m.parent = ?",
+                WHERE m.parent = $1",
             tree.item.item.id
         )
         .fetch_all(&mut *connection)
@@ -611,10 +611,10 @@ pub async fn box_contents(
 }
 
 pub async fn get_all_itemtrees(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
 ) -> color_eyre::Result<HashMap<Option<String>, Vec<ItemTree>>> {
     let single_conn = connection.acquire().await?;
-    let roots: Vec<(Option<String>, i64, String, String)> = sqlx::query_as(
+    let roots: Vec<(Option<String>, i32, String, String)> = sqlx::query_as(
         "SELECT b.to_user, i.id, i.strid, i.name
             FROM borrow b
             JOIN (
@@ -639,7 +639,7 @@ pub async fn get_all_itemtrees(
     Ok(trees)
 }
 pub async fn get_itemtrees(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     user: impl AsRef<str>,
 ) -> color_eyre::Result<Vec<ItemTree>> {
     let single_conn = connection.acquire().await?;
@@ -656,7 +656,7 @@ pub async fn get_itemtrees(
             ON b.item_id = max_orders.item_id 
             LEFT JOIN meta m ON b.item_id = m.child
             JOIN items i ON b.item_id = i.id
-            WHERE b.ordering = max_orders.max_ordering AND (m.parent IS NULL OR m.present IS FALSE) AND b.to_user = ?;", 
+            WHERE b.ordering = max_orders.max_ordering AND (m.parent IS NULL OR m.present IS FALSE) AND b.to_user = $1;", 
             user
     )
     .fetch_all(&mut *single_conn)
@@ -673,19 +673,19 @@ pub async fn get_itemtrees(
 
 /// Delete the given item, return a tree containing the previous children which are now orphans
 pub async fn delete_item(
-    connection: &mut SqliteConnection,
+    connection: &mut PgConnection,
     item: &Item,
 ) -> color_eyre::Result<ItemTree> {
     let tree = box_contents(connection, item).await?;
 
-    sqlx::query!("DELETE FROM items WHERE id = ?;", item.id)
+    sqlx::query!("DELETE FROM items WHERE id = $1;", item.id)
         .execute(&mut *connection)
         .await?;
     Ok(tree)
 }
 
 pub async fn list_storage(
-    pool: &SqlitePool,
+    pool: &PgPool,
     location: Option<Location>,
 ) -> color_eyre::Result<HashMap<Location, Vec<ItemTree>>> {
     let locations = if let Some(location) = location {

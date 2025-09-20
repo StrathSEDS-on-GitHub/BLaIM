@@ -1,0 +1,24 @@
+services:
+  blaim-bot:
+    build:
+      context: .
+      dockerfile: blaim/Dockerfile
+    container_name: blaim-bot
+    environment:
+      DATABASE_URL: postgres://postgres:password@db:5432/postgres
+    depends_on:
+      - db
+
+  db:
+    image: postgres:17-alpine
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

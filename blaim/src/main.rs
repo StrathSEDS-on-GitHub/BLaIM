@@ -16,12 +16,12 @@ use serenity::all::{
 };
 use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::types::chrono;
-use sqlx::{Acquire, SqliteConnection, SqlitePool};
+use sqlx::{Acquire, PgConnection, PgPool};
 
 struct Data {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 type Error = color_eyre::eyre::Error;
@@ -29,7 +29,7 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 
 const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
 
-async fn format_owner(connection: &mut SqliteConnection, owner: &str) -> String {
+async fn format_owner(connection: &mut PgConnection, owner: &str) -> String {
     if let Some(owner) = owner.strip_prefix("loc:") {
         format!(
             "{}",
@@ -50,7 +50,7 @@ async fn autocomplete_item<'a>(
 ) -> Box<dyn Iterator<Item = String> + Send + 'a> {
     let conn = &mut ctx.data().pool.acquire().await;
     if let Ok(conn) = conn {
-        let conn = conn as &mut SqliteConnection;
+        let conn = conn as &mut PgConnection;
         Box::new(
             blaim_db::lookup_item(conn, partial)
                 .await
@@ -69,7 +69,7 @@ async fn autocomplete_store<'a>(
 ) -> Box<dyn Iterator<Item = String> + Send + 'a> {
     let conn = &mut ctx.data().pool.acquire().await;
     if let Ok(conn) = conn {
-        let conn = conn as &mut SqliteConnection;
+        let conn = conn as &mut PgConnection;
         Box::new(
             blaim_db::lookup_storage(conn, partial)
                 .await
@@ -83,7 +83,7 @@ async fn autocomplete_store<'a>(
 }
 
 async fn make_embed(
-    transaction: &mut SqliteConnection,
+    transaction: &mut PgConnection,
     selected: &blaim_db::Item,
     from: &Option<String>,
     to: &str,
@@ -178,14 +178,14 @@ async fn handle_edits<T>(
     handle: &ReplyHandle<'_>,
     recreate: impl for<'a> Fn(
         &'a T,
-        &'a mut SqliteConnection,
-        i64,
+        &'a mut PgConnection,
+        i32,
     ) -> Pin<
         Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     >,
     mut embed: CreateEmbed,
-    connection: &mut SqliteConnection,
-    mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
+    connection: &mut PgConnection,
+    mut transaction: sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> color_eyre::Result<()> {
     let message_id = handle.message().await?.id;
     let mut deleted = false;
@@ -315,8 +315,8 @@ async fn borrow(
     }
 
     let task = for<'a> |state: &'a State,
-                        connection: &'a mut SqliteConnection,
-                        item_id: i64|
+                        connection: &'a mut PgConnection,
+                        item_id: i32|
              -> Pin<
         Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
@@ -673,8 +673,8 @@ async fn store(
     }
 
     let task = for<'a> |state: &'a State,
-                        connection: &'a mut SqliteConnection,
-                        item_id: i64|
+                        connection: &'a mut PgConnection,
+                        item_id: i32|
              -> Pin<
         Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
@@ -796,8 +796,8 @@ async fn give(
     }
 
     let task = for<'a> |state: &'a State,
-                        connection: &'a mut SqliteConnection,
-                        item_id: i64|
+                        connection: &'a mut PgConnection,
+                        item_id: i32|
              -> Pin<
         Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
@@ -912,8 +912,8 @@ async fn item_delete(
     };
 
     let task = for<'a> |state: &'a State,
-                        connection: &'a mut SqliteConnection,
-                        item_id: i64|
+                        connection: &'a mut PgConnection,
+                        item_id: i32|
              -> Pin<
         Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
@@ -1060,7 +1060,7 @@ pub async fn box_info(
 
 async fn lookup_item_retaining_query(
     item: String,
-    pool: &SqlitePool,
+    pool: &PgPool,
 ) -> color_eyre::Result<(String, Option<blaim_db::Item>)> {
     let found = blaim_db::lookup_item(&mut *pool.acquire().await?, &item)
         .await?
@@ -1258,7 +1258,7 @@ async fn main() -> color_eyre::Result<()> {
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::non_privileged();
 
-    let pool = SqlitePoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect("sqlite://./db.sqlite")
         .await?;

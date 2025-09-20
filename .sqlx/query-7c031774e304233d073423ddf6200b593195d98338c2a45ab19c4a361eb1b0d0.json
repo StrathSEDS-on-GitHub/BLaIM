@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.strid, i.name\n        FROM borrow b\n        JOIN (\n            SELECT item_id, MAX(ordering) AS max_ordering\n            FROM borrow\n            GROUP BY item_id\n        ) AS max_orders\n        ON b.item_id = max_orders.item_id \n        JOIN items i ON b.item_id = i.id\n        WHERE b.ordering = max_orders.max_ordering AND b.to_user = $1;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "strid",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7c031774e304233d073423ddf6200b593195d98338c2a45ab19c4a361eb1b0d0"
+}

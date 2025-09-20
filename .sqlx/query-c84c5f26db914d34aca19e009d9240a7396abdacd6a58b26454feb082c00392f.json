@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, strid, name FROM storage;",
+  "query": "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = $1",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int4"
+      ]
     },
     "nullable": [
       false,
@@ -28,5 +30,5 @@
       false
     ]
   },
-  "hash": "9a40c0966c995c2162f36c77d62bc98257a1a86936e45b7e6ee864d61a6b9f60"
+  "hash": "c84c5f26db914d34aca19e009d9240a7396abdacd6a58b26454feb082c00392f"
 }

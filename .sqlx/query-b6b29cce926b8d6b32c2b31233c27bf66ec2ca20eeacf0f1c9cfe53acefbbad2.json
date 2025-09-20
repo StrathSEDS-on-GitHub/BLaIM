@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT to_user FROM borrow WHERE item_id = $1 ORDER BY ordering DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "to_user",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b6b29cce926b8d6b32c2b31233c27bf66ec2ca20eeacf0f1c9cfe53acefbbad2"
+}

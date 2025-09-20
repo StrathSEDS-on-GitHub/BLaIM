@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM meta WHERE child = $1 AND parent = $2 RETURNING child;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "child",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7971027a5bd5453872dbcc85c125d7620882bdc5ccaab210ed4516892d8bf7a8"
+}

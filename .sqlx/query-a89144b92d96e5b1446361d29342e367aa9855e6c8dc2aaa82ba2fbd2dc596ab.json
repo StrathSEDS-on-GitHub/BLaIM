@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT to_user, time FROM borrow WHERE item_id = $1 ORDER BY ordering DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "to_user",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "time",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a89144b92d96e5b1446361d29342e367aa9855e6c8dc2aaa82ba2fbd2dc596ab"
+}

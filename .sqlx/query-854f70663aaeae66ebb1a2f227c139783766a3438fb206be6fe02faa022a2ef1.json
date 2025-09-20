@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.name, i.strid, m.present\n                FROM meta m\n                JOIN items i ON m.child = i.id\n                WHERE m.parent = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "strid",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "present",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "854f70663aaeae66ebb1a2f227c139783766a3438fb206be6fe02faa022a2ef1"
+}
