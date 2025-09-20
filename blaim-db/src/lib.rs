@@ -7,8 +7,6 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use sqlx::{Acquire, Row, SqliteConnection, SqlitePool};
 
-use crate::format_owner;
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
     pub id: i64,
@@ -16,7 +14,7 @@ pub struct Item {
     pub strid: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Location {
     pub id: i64,
     pub name: String,
@@ -38,7 +36,7 @@ fn fuzzy_search<'b, T: std::fmt::Debug>(
     scores
 }
 
-pub(crate) async fn lookup_storage(
+pub async fn lookup_storage(
     connection: &mut SqliteConnection,
     location: &str,
 ) -> anyhow::Result<Vec<Location>> {
@@ -71,7 +69,7 @@ pub(crate) async fn lookup_storage(
     Ok(exact_matches.into_iter().chain(results).collect())
 }
 
-pub(crate) async fn lookup_item(
+pub async fn lookup_item(
     connection: &mut SqliteConnection,
     item: &str,
 ) -> anyhow::Result<Vec<Item>> {
@@ -104,7 +102,7 @@ pub(crate) async fn lookup_item(
     Ok(exact_matches.into_iter().chain(results).collect())
 }
 
-pub(crate) async fn get_item_by_id(
+pub async fn get_item_by_id(
     connection: &mut SqliteConnection,
     id: i64,
 ) -> anyhow::Result<Option<Item>> {
@@ -114,7 +112,7 @@ pub(crate) async fn get_item_by_id(
     Ok(item)
 }
 
-pub(crate) async fn get_last_holder(
+pub async fn get_last_holder(
     connection: &mut SqliteConnection,
     item_id: i64,
 ) -> anyhow::Result<Option<String>> {
@@ -127,7 +125,7 @@ pub(crate) async fn get_last_holder(
     Ok(holder.map(|row| row.to_user))
 }
 
-pub(crate) async fn borrow_item(
+pub async fn borrow_item(
     connection: &mut SqliteConnection,
     item: &Item,
     user: &str,
@@ -218,7 +216,7 @@ pub(crate) async fn borrow_item(
     Ok((update_tree, present_updates))
 }
 
-pub(crate) async fn borrow_history(
+pub async fn borrow_history(
     connection: &mut SqliteConnection,
     item_id: i64,
 ) -> anyhow::Result<Vec<(String, DateTime<Utc>)>> {
@@ -239,7 +237,7 @@ pub(crate) async fn borrow_history(
         .collect())
 }
 
-pub(crate) async fn register_item(
+pub async fn register_item(
     connection: &mut SqliteConnection,
     strid: &str,
     name: &str,
@@ -254,7 +252,7 @@ pub(crate) async fn register_item(
     Ok(())
 }
 
-pub(crate) async fn get_items_by_owner(
+pub async fn get_items_by_owner(
     pool: &mut SqliteConnection,
     owner: &str,
 ) -> anyhow::Result<Vec<Item>> {
@@ -324,7 +322,7 @@ impl std::error::Error for BoxingError {
     }
 }
 
-pub(crate) async fn box_all(
+pub async fn box_all(
     connection: &mut SqliteConnection,
     owner: &str,
     r#box: &Item,
@@ -402,7 +400,7 @@ impl From<sqlx::Error> for UnboxingError {
     }
 }
 
-pub(crate) async fn parent_box(
+pub async fn parent_box(
     connection: &mut SqliteConnection,
     item: &Item,
 ) -> anyhow::Result<Option<Item>> {
@@ -416,7 +414,7 @@ pub(crate) async fn parent_box(
     Ok(parent)
 }
 
-pub(crate) async fn find_location_name(
+pub async fn find_location_name(
     connection: &mut SqliteConnection,
     strid: &str,
 ) -> anyhow::Result<Option<Location>> {
@@ -430,7 +428,7 @@ pub(crate) async fn find_location_name(
     Ok(location)
 }
 
-pub(crate) async fn unbox_all(
+pub async fn unbox_all(
     connection: &mut SqliteConnection,
     r#box: &Item,
     items: &[Item],
@@ -454,13 +452,13 @@ pub(crate) async fn unbox_all(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ItemTreeNode {
+pub struct ItemTreeNode {
     pub item: Item,
     pub present: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ItemTree {
+pub struct ItemTree {
     pub item: ItemTreeNode,
     pub children: Vec<ItemTree>,
 }
@@ -578,7 +576,7 @@ impl FromIterator<(usize, ItemTreeNode, bool)> for ItemTree {
     }
 }
 
-pub(crate) async fn box_contents(
+pub async fn box_contents(
     connection: &mut SqliteConnection,
     r#box: &Item,
 ) -> anyhow::Result<ItemTree> {
@@ -689,25 +687,28 @@ pub async fn delete_item(
     Ok(tree)
 }
 
-pub(crate) async fn list_storage(
+pub async fn list_storage(
     pool: &SqlitePool,
-    location: Option<String>,
-) -> anyhow::Result<HashMap<String, Vec<ItemTree>>> {
-    let locations = if let Some(strid) = location {
-        let name = format_owner(&mut *pool.acquire().await?, &format!("loc:{strid}")).await;
-        vec![(strid, name)]
+    location: Option<Location>,
+) -> anyhow::Result<HashMap<Location, Vec<ItemTree>>> {
+    let locations = if let Some(location) = location {
+        vec![location]
     } else {
-        sqlx::query_as("SELECT strid, name FROM storage;")
+        sqlx::query_as!(Location, "SELECT id, strid, name FROM storage;")
             .fetch_all(&mut *pool.acquire().await?)
             .await?
             .into_iter()
             .collect()
     };
 
-    let mut itemtrees: HashMap<String, Vec<ItemTree>> = HashMap::new();
-    for (strid, name) in locations {
-        let trees = get_itemtrees(&mut *pool.acquire().await?, format!("loc:{strid}")).await?;
-        itemtrees.insert(name, trees);
+    let mut itemtrees: HashMap<Location, Vec<ItemTree>> = HashMap::new();
+    for location in locations {
+        let trees = get_itemtrees(
+            &mut *pool.acquire().await?,
+            format!("loc:{}", location.strid),
+        )
+        .await?;
+        itemtrees.insert(location, trees);
     }
 
     Ok(itemtrees)

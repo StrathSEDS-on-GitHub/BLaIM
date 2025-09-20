@@ -151,11 +151,21 @@ name = "blaim"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
+ "blaim-db",
  "color-eyre",
- "fuzzy-matcher",
  "poise",
  "serenity",
+ "sqlx",
+ "tokio",
+]
+
+[[package]]
+name = "blaim-db"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fuzzy-matcher",
  "sqlx",
  "tokio",
 ]

@@ -7,7 +7,7 @@ use std::env;
 use std::future::Future;
 use std::pin::Pin;
 
-use db::ItemTree;
+use blaim_db::ItemTree;
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{
     ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton,
@@ -17,9 +17,8 @@ use serenity::all::{
 use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
 use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::types::chrono;
 use sqlx::{Acquire, SqliteConnection, SqlitePool};
-
-mod db;
 
 struct Data {
     pool: SqlitePool,
@@ -30,6 +29,21 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 
 const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
 
+async fn format_owner(connection: &mut SqliteConnection, owner: &str) -> String {
+    if let Some(owner) = owner.strip_prefix("loc:") {
+        format!(
+            "{}",
+            blaim_db::find_location_name(connection, owner)
+                .await
+                .unwrap()
+                .unwrap()
+                .name
+        )
+    } else {
+        format!("<@{}>", owner)
+    }
+}
+
 async fn autocomplete_item<'a>(
     ctx: Context<'_>,
     partial: &'a str,
@@ -38,7 +52,7 @@ async fn autocomplete_item<'a>(
     if let Ok(conn) = conn {
         let conn = conn as &mut SqliteConnection;
         Box::new(
-            db::lookup_item(conn, partial)
+            blaim_db::lookup_item(conn, partial)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -46,21 +60,6 @@ async fn autocomplete_item<'a>(
         )
     } else {
         Box::new([].into_iter())
-    }
-}
-
-async fn format_owner(connection: &mut SqliteConnection, owner: &str) -> String {
-    if let Some(owner) = owner.strip_prefix("loc:") {
-        format!(
-            "{}",
-            db::find_location_name(connection, owner)
-                .await
-                .unwrap()
-                .unwrap()
-                .name
-        )
-    } else {
-        format!("<@{}>", owner)
     }
 }
 
@@ -72,7 +71,7 @@ async fn autocomplete_store<'a>(
     if let Ok(conn) = conn {
         let conn = conn as &mut SqliteConnection;
         Box::new(
-            db::lookup_storage(conn, partial)
+            blaim_db::lookup_storage(conn, partial)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -85,11 +84,11 @@ async fn autocomplete_store<'a>(
 
 async fn make_embed(
     transaction: &mut SqliteConnection,
-    selected: &db::Item,
+    selected: &blaim_db::Item,
     from: &Option<String>,
     to: &str,
-    alternatives: &[db::Item],
-    (updated_items, present_updates): &(ItemTree, Vec<(db::Item, db::Item, bool)>),
+    alternatives: &[blaim_db::Item],
+    (updated_items, present_updates): &(ItemTree, Vec<(blaim_db::Item, blaim_db::Item, bool)>),
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
     let previous_owner = if let Some(ref owner) = from {
         format_owner(transaction, owner).await
@@ -279,7 +278,7 @@ async fn borrow(
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
-    let items = db::lookup_item(&mut *transaction, &item).await?;
+    let items = blaim_db::lookup_item(&mut *transaction, &item).await?;
 
     let selected = match items.first() {
         Some(selected) => selected,
@@ -295,7 +294,7 @@ async fn borrow(
         }
     };
 
-    let previous_owner = db::get_last_holder(&mut *transaction, selected.id).await?;
+    let previous_owner = blaim_db::get_last_holder(&mut *transaction, selected.id).await?;
 
     if let Some(ref owner) = previous_owner
         && owner == &ctx.author().id.to_string()
@@ -312,7 +311,7 @@ async fn borrow(
     struct State {
         previous_owner: Option<String>,
         author_id: String,
-        items: Vec<db::Item>,
+        items: Vec<blaim_db::Item>,
     }
 
     let task = for<'a> |state: &'a State,
@@ -329,7 +328,7 @@ async fn borrow(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let results = db::borrow_item(&mut *connection, selected, &state.author_id).await?;
+            let results = blaim_db::borrow_item(&mut *connection, selected, &state.author_id).await?;
             let (embed, components) = make_embed(
                 connection,
                 &selected,
@@ -386,7 +385,7 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let embed = if let Some(ref user) = user {
-        let items = db::get_itemtrees(&mut *connection, user.id.to_string()).await?;
+        let items = blaim_db::get_itemtrees(&mut *connection, user.id.to_string()).await?;
         let message = "```".to_string()
             + &items
                 .into_iter()
@@ -402,7 +401,7 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
             .title(format!("📦 Items held by {}", user.name))
             .description(message)
     } else {
-        let items = db::get_all_itemtrees(&mut *connection).await?;
+        let items = blaim_db::get_all_itemtrees(&mut *connection).await?;
         let description = try_join_all(items.iter().map(async |(owner, trees)| {
             Ok::<_, anyhow::Error>(if trees.is_empty() {
                 "Nothing to see here".to_string()
@@ -449,7 +448,7 @@ async fn blame(
         return Ok(());
     }
     let mut connection = ctx.data().pool.acquire().await?;
-    let item = db::lookup_item(&mut *connection, &item).await?;
+    let item = blaim_db::lookup_item(&mut *connection, &item).await?;
     let item = match item.first() {
         Some(item) => item,
         None => {
@@ -464,7 +463,7 @@ async fn blame(
         }
     };
 
-    let history = db::borrow_history(&mut *connection, item.id).await?;
+    let history = blaim_db::borrow_history(&mut *connection, item.id).await?;
     if history.is_empty() {
         let embed = CreateEmbed::new()
             .title("No history found")
@@ -482,7 +481,7 @@ async fn blame(
     }
     let borrowers = borrowers.into_iter();
 
-    let parent_box = db::parent_box(&mut *connection, item).await?;
+    let parent_box = blaim_db::parent_box(&mut *connection, item).await?;
 
     let mut embed = CreateEmbed::new()
         .title(format!("Borrow history for {}", item.name))
@@ -544,16 +543,15 @@ async fn storage(
     }
 
     let location = if let Some(location) = location {
-        let Some(location) = db::lookup_storage(&mut *ctx.data().pool.acquire().await?, &location)
+        let Some(location) = blaim_db::lookup_storage(&mut *ctx.data().pool.acquire().await?, &location)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|item| item.strid)
             .next()
         else {
             let embed = CreateEmbed::new()
                 .title("No storage found")
-                .description("No storage found with that name. Please try again.");
+                .description("No storage found with that name.");
             let reply = CreateReply::default().embed(embed);
             ctx.send(reply).await?;
             return Ok(());
@@ -563,13 +561,13 @@ async fn storage(
         None
     };
 
-    let items = db::list_storage(&ctx.data().pool, location.clone()).await?;
+    let items = blaim_db::list_storage(&ctx.data().pool, location.clone()).await?;
 
     let embed = CreateEmbed::new()
         .title("📦 Storage contents")
         .fields(items.iter().map(|(location, trees)| {
             (
-                format!("📍 **{}**\n", location),
+                format!("📍 **{}**\n", location.name),
                 if trees.is_empty() {
                     "Nothing to see here".to_string()
                 } else {
@@ -609,7 +607,7 @@ async fn store(
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
-    let items = db::lookup_item(&mut *transaction, &item).await?;
+    let items = blaim_db::lookup_item(&mut *transaction, &item).await?;
 
     let location = location.unwrap_or("jw9".to_string());
 
@@ -627,7 +625,7 @@ async fn store(
         }
     };
 
-    let Some(location) = db::lookup_storage(&mut *transaction, &location)
+    let Some(location) = blaim_db::lookup_storage(&mut *transaction, &location)
         .await?
         .into_iter()
         .next()
@@ -642,7 +640,7 @@ async fn store(
         return Ok(());
     };
 
-    let owner = db::get_last_holder(&mut *transaction, selected.id).await?;
+    let owner = blaim_db::get_last_holder(&mut *transaction, selected.id).await?;
 
     if let Some(ref owner) = owner
         && owner != &ctx.author().id.to_string()
@@ -670,7 +668,7 @@ async fn store(
 
     struct State {
         previous_owner: Option<String>,
-        items: Vec<db::Item>,
+        items: Vec<blaim_db::Item>,
         location: String,
     }
 
@@ -688,7 +686,7 @@ async fn store(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let results = db::borrow_item(&mut *connection, selected, &state.location).await?;
+            let results = blaim_db::borrow_item(&mut *connection, selected, &state.location).await?;
             let (embed, components) = make_embed(
                 &mut *connection,
                 &selected,
@@ -749,7 +747,7 @@ async fn give(
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
-    let items = db::lookup_item(&mut *transaction, &item).await?;
+    let items = blaim_db::lookup_item(&mut *transaction, &item).await?;
 
     let selected = match items.first() {
         Some(selected) => selected,
@@ -765,7 +763,7 @@ async fn give(
         }
     };
 
-    let owner = db::get_last_holder(&mut *transaction, selected.id).await?;
+    let owner = blaim_db::get_last_holder(&mut *transaction, selected.id).await?;
 
     if let Some(ref owner) = owner
         && owner != &ctx.author().id.to_string()
@@ -793,7 +791,7 @@ async fn give(
 
     struct State {
         previous_owner: Option<String>,
-        items: Vec<db::Item>,
+        items: Vec<blaim_db::Item>,
         user_id: String,
     }
 
@@ -811,7 +809,7 @@ async fn give(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let results = db::borrow_item(&mut *connection, selected, &state.user_id).await?;
+            let results = blaim_db::borrow_item(&mut *connection, selected, &state.user_id).await?;
             let (embed, components) = make_embed(
                 &mut *connection,
                 &selected,
@@ -873,7 +871,7 @@ async fn item_register(
         ctx.send(CreateReply::default().embed(embed)).await?;
         return Ok(());
     }
-    db::register_item(&mut *ctx.data().pool.acquire().await?, &strid, &name).await?;
+    blaim_db::register_item(&mut *ctx.data().pool.acquire().await?, &strid, &name).await?;
     ctx.reply(":white_check_mark: Item registered").await?;
 
     Ok(())
@@ -897,7 +895,7 @@ async fn item_delete(
     }
     let mut connection = ctx.data().pool.acquire().await?;
     let mut transaction = connection.begin().await?;
-    let items = db::lookup_item(&mut *transaction, &item).await?;
+    let items = blaim_db::lookup_item(&mut *transaction, &item).await?;
 
     let selected = match items.first() {
         Some(selected) => selected,
@@ -927,7 +925,7 @@ async fn item_delete(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let orphans = db::delete_item(&mut *connection, selected).await?;
+            let orphans = blaim_db::delete_item(&mut *connection, selected).await?;
             let mut components = vec![CreateActionRow::Buttons(vec![
                 CreateButton::new("cancel")
                     .label("Cancel")
@@ -978,7 +976,7 @@ async fn item_delete(
     };
 
     struct State {
-        items: Vec<db::Item>,
+        items: Vec<blaim_db::Item>,
     }
     let state = State {
         items: items.clone(),
@@ -1031,7 +1029,7 @@ pub async fn box_info(
         return Ok(());
     }
     let mut connection = ctx.data().pool.acquire().await?;
-    let item = db::lookup_item(&mut connection, &r#box).await?;
+    let item = blaim_db::lookup_item(&mut connection, &r#box).await?;
     let item = match item.first() {
         Some(item) => item,
         None => {
@@ -1046,7 +1044,7 @@ pub async fn box_info(
         }
     };
 
-    let items = db::box_contents(&mut connection, item).await?;
+    let items = blaim_db::box_contents(&mut connection, item).await?;
     let message = "```".to_string() + &items.to_string() + "```";
     let embed = CreateEmbed::new()
         .title(format!(":white_check_mark: Box contents for {}", item.name))
@@ -1063,8 +1061,8 @@ pub async fn box_info(
 async fn lookup_item_retaining_query(
     item: String,
     pool: &SqlitePool,
-) -> anyhow::Result<(String, Option<db::Item>)> {
-    let found = db::lookup_item(&mut *pool.acquire().await?, &item)
+) -> anyhow::Result<(String, Option<blaim_db::Item>)> {
+    let found = blaim_db::lookup_item(&mut *pool.acquire().await?, &item)
         .await?
         .into_iter()
         .nth(0);
@@ -1109,8 +1107,8 @@ pub async fn box_add(
     .await?;
 
     // It does not compile if I inline it. wtf.
-    let result_is_none = |it: &&(String, Option<db::Item>)| -> bool { it.1.is_none() };
-    let format_error = |it: &(String, Option<db::Item>)| -> String {
+    let result_is_none = |it: &&(String, Option<blaim_db::Item>)| -> bool { it.1.is_none() };
+    let format_error = |it: &(String, Option<blaim_db::Item>)| -> String {
         format!(":red_circle: Couldn't find anything matching '{}'", it.0)
     };
 
@@ -1136,7 +1134,7 @@ pub async fn box_add(
 
     let (box_item, rest) = items.split_first().unwrap();
 
-    if let Err(err) = db::box_all(
+    if let Err(err) = blaim_db::box_all(
         &mut *transaction,
         &ctx.author().id.to_string(),
         box_item,
@@ -1202,8 +1200,8 @@ pub async fn box_rm(
     )
     .await?;
 
-    let result_is_none = |it: &&(String, Option<db::Item>)| -> bool { it.1.is_none() };
-    let format_error = |it: &(String, Option<db::Item>)| -> String {
+    let result_is_none = |it: &&(String, Option<blaim_db::Item>)| -> bool { it.1.is_none() };
+    let format_error = |it: &(String, Option<blaim_db::Item>)| -> String {
         format!(":red_circle: Couldn't find anything matching '{}'", it.0)
     };
 
@@ -1229,7 +1227,7 @@ pub async fn box_rm(
 
     let (box_item, items) = items.split_first().unwrap();
 
-    if let Err(err) = db::unbox_all(&mut *transaction, box_item, items).await {
+    if let Err(err) = blaim_db::unbox_all(&mut *transaction, box_item, items).await {
         ctx.send(
             CreateReply::default().embed(
                 CreateEmbed::new()
