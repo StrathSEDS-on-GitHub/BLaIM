@@ -3,8 +3,8 @@ use std::fmt::{self, Display};
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use sqlx::{Acquire, Row, SqliteConnection, SqlitePool};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -39,7 +39,7 @@ fn fuzzy_search<'b, T: std::fmt::Debug>(
 pub async fn lookup_storage(
     connection: &mut SqliteConnection,
     location: &str,
-) -> anyhow::Result<Vec<Location>> {
+) -> color_eyre::Result<Vec<Location>> {
     let item = location.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Location,
@@ -72,7 +72,7 @@ pub async fn lookup_storage(
 pub async fn lookup_item(
     connection: &mut SqliteConnection,
     item: &str,
-) -> anyhow::Result<Vec<Item>> {
+) -> color_eyre::Result<Vec<Item>> {
     let item = item.to_lowercase();
     let exact_matches: Vec<_> = sqlx::query_as!(
         Item,
@@ -105,7 +105,7 @@ pub async fn lookup_item(
 pub async fn get_item_by_id(
     connection: &mut SqliteConnection,
     id: i64,
-) -> anyhow::Result<Option<Item>> {
+) -> color_eyre::Result<Option<Item>> {
     let item = sqlx::query_as!(Item, "SELECT id, strid, name FROM items WHERE id = ?", id)
         .fetch_optional(&mut *connection)
         .await?;
@@ -115,7 +115,7 @@ pub async fn get_item_by_id(
 pub async fn get_last_holder(
     connection: &mut SqliteConnection,
     item_id: i64,
-) -> anyhow::Result<Option<String>> {
+) -> color_eyre::Result<Option<String>> {
     let holder = sqlx::query!(
         "SELECT to_user FROM borrow WHERE item_id = ? ORDER BY ordering DESC LIMIT 1",
         item_id
@@ -129,7 +129,7 @@ pub async fn borrow_item(
     connection: &mut SqliteConnection,
     item: &Item,
     user: &str,
-) -> anyhow::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
+) -> color_eyre::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
     let now = sqlx::types::chrono::Utc::now();
     let items = box_contents(connection, item).await?;
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
@@ -219,7 +219,7 @@ pub async fn borrow_item(
 pub async fn borrow_history(
     connection: &mut SqliteConnection,
     item_id: i64,
-) -> anyhow::Result<Vec<(String, DateTime<Utc>)>> {
+) -> color_eyre::Result<Vec<(String, DateTime<Utc>)>> {
     let history = sqlx::query!(
         "SELECT to_user, time FROM borrow WHERE item_id = ? ORDER BY ordering DESC",
         item_id
@@ -241,7 +241,7 @@ pub async fn register_item(
     connection: &mut SqliteConnection,
     strid: &str,
     name: &str,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     sqlx::query!(
         "INSERT INTO items (strid, name) VALUES (?, ?);",
         strid,
@@ -255,7 +255,7 @@ pub async fn register_item(
 pub async fn get_items_by_owner(
     pool: &mut SqliteConnection,
     owner: &str,
-) -> anyhow::Result<Vec<Item>> {
+) -> color_eyre::Result<Vec<Item>> {
     let connection = pool.acquire().await?;
     let items = sqlx::query_as!(
         Item,
@@ -280,7 +280,7 @@ pub async fn get_items_by_owner(
 pub enum BoxingError {
     NonEuclidean { prior_parent: Item, item: Item },
     AlreadyBoxed { prior_parent: Item, item: Item },
-    Other(anyhow::Error),
+    Other(color_eyre::eyre::Error),
 }
 impl From<sqlx::Error> for BoxingError {
     fn from(err: sqlx::Error) -> Self {
@@ -288,8 +288,8 @@ impl From<sqlx::Error> for BoxingError {
     }
 }
 
-impl From<anyhow::Error> for BoxingError {
-    fn from(err: anyhow::Error) -> Self {
+impl From<color_eyre::eyre::Error> for BoxingError {
+    fn from(err: color_eyre::eyre::Error) -> Self {
         Self::Other(err)
     }
 }
@@ -297,15 +297,15 @@ impl From<anyhow::Error> for BoxingError {
 impl std::fmt::Display for BoxingError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::NonEuclidean {
-                prior_parent,
-                item
-            } => write!(
+            Self::NonEuclidean { prior_parent, item } => write!(
                 f,
                 "Non-euclidean boxes not yet supported. '{}' was previously in box '{}', but will now be a parent of '{}'.",
                 item.name, prior_parent.name, prior_parent.name
             ),
-            Self::AlreadyBoxed { item, prior_parent: prior_box } => {
+            Self::AlreadyBoxed {
+                item,
+                prior_parent: prior_box,
+            } => {
                 write!(f, "'{}' is already in box {}.", item.name, prior_box.name)
             }
             Self::Other(err) => write!(f, "An error occurred: {}", err),
@@ -371,7 +371,7 @@ pub async fn box_all(
 #[derive(Debug)]
 pub enum UnboxingError {
     NotFound { item: Item, r#box: Item },
-    Other(anyhow::Error),
+    Other(color_eyre::eyre::Error),
 }
 
 impl Display for UnboxingError {
@@ -403,7 +403,7 @@ impl From<sqlx::Error> for UnboxingError {
 pub async fn parent_box(
     connection: &mut SqliteConnection,
     item: &Item,
-) -> anyhow::Result<Option<Item>> {
+) -> color_eyre::Result<Option<Item>> {
     let parent = sqlx::query_as!(
         Item,
         "SELECT i.id, i.strid, i.name FROM meta JOIN items i ON meta.parent = i.id WHERE meta.child = ?",
@@ -417,7 +417,7 @@ pub async fn parent_box(
 pub async fn find_location_name(
     connection: &mut SqliteConnection,
     strid: &str,
-) -> anyhow::Result<Option<Location>> {
+) -> color_eyre::Result<Option<Location>> {
     let location = sqlx::query_as!(
         Location,
         "SELECT id, strid, name FROM storage WHERE strid = ?",
@@ -579,7 +579,7 @@ impl FromIterator<(usize, ItemTreeNode, bool)> for ItemTree {
 pub async fn box_contents(
     connection: &mut SqliteConnection,
     r#box: &Item,
-) -> anyhow::Result<ItemTree> {
+) -> color_eyre::Result<ItemTree> {
     let mut root = ItemTree::new(r#box.clone(), true);
     let mut open_set = VecDeque::new();
     open_set.push_back(&mut root);
@@ -612,10 +612,10 @@ pub async fn box_contents(
 
 pub async fn get_all_itemtrees(
     connection: &mut SqliteConnection,
-) -> anyhow::Result<HashMap<Option<String>, Vec<ItemTree>>> {
+) -> color_eyre::Result<HashMap<Option<String>, Vec<ItemTree>>> {
     let single_conn = connection.acquire().await?;
     let roots: Vec<(Option<String>, i64, String, String)> = sqlx::query_as(
-            "SELECT b.to_user, i.id, i.strid, i.name
+        "SELECT b.to_user, i.id, i.strid, i.name
             FROM borrow b
             JOIN (
                 SELECT item_id, MAX(ordering) AS max_ordering
@@ -626,17 +626,14 @@ pub async fn get_all_itemtrees(
             RIGHT JOIN items i ON b.item_id = i.id
             WHERE (b.ordering = max_orders.max_ordering 
                 OR max_orders.max_ordering IS NULL) 
-                AND (m.parent IS NULL OR m.present IS FALSE);"
-        )
-        .fetch_all(&mut *single_conn)
-        .await?;
+                AND (m.parent IS NULL OR m.present IS FALSE);",
+    )
+    .fetch_all(&mut *single_conn)
+    .await?;
     let mut trees = HashMap::new();
     for (owner, id, strid, name) in roots {
         let tree = box_contents(&mut *single_conn, &Item { id, strid, name }).await?;
-        trees
-            .entry(owner)
-            .or_insert(Vec::new())
-            .push(tree);
+        trees.entry(owner).or_insert(Vec::new()).push(tree);
     }
 
     Ok(trees)
@@ -644,7 +641,7 @@ pub async fn get_all_itemtrees(
 pub async fn get_itemtrees(
     connection: &mut SqliteConnection,
     user: impl AsRef<str>,
-) -> anyhow::Result<Vec<ItemTree>> {
+) -> color_eyre::Result<Vec<ItemTree>> {
     let single_conn = connection.acquire().await?;
     let user = user.as_ref();
     let roots = sqlx::query_as!(
@@ -678,7 +675,7 @@ pub async fn get_itemtrees(
 pub async fn delete_item(
     connection: &mut SqliteConnection,
     item: &Item,
-) -> anyhow::Result<ItemTree> {
+) -> color_eyre::Result<ItemTree> {
     let tree = box_contents(connection, item).await?;
 
     sqlx::query!("DELETE FROM items WHERE id = ?;", item.id)
@@ -690,7 +687,7 @@ pub async fn delete_item(
 pub async fn list_storage(
     pool: &SqlitePool,
     location: Option<Location>,
-) -> anyhow::Result<HashMap<Location, Vec<ItemTree>>> {
+) -> color_eyre::Result<HashMap<Location, Vec<ItemTree>>> {
     let locations = if let Some(location) = location {
         vec![location]
     } else {

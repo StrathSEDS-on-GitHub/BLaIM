@@ -9,4 +9,4 @@ fuzzy-matcher = "0.3.7"
 
 sqlx.workspace = true
 tokio.workspace = true
-anyhow.workspace = true
+color-eyre.workspace = true

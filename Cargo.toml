@@ -4,5 +4,5 @@ members = ["blaim", "blaim-db"]
 
 [workspace.dependencies]
 sqlx = { version = "0.7.4", features = ["runtime-tokio", "sqlite", "chrono"] }
-anyhow = {version="1.0.83", features=["backtrace"]}
 tokio = { version = "1.37.0", features = ["full"] }
+color-eyre = "0.6.5"

@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-color-eyre = "0.6.3"
 poise = "0.6.1"
 serenity = "0.12.1"
 blaim-db = { path = "../blaim-db" }
 
 sqlx.workspace = true
 tokio.workspace = true
-anyhow.workspace = true
+color-eyre.workspace = true

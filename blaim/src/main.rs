@@ -24,7 +24,7 @@ struct Data {
     pool: SqlitePool,
 }
 
-type Error = anyhow::Error;
+type Error = color_eyre::eyre::Error;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
 const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
@@ -181,12 +181,12 @@ async fn handle_edits<T>(
         &'a mut SqliteConnection,
         i64,
     ) -> Pin<
-        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     >,
     mut embed: CreateEmbed,
     connection: &mut SqliteConnection,
     mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     let message_id = handle.message().await?.id;
     let mut deleted = false;
 
@@ -318,7 +318,7 @@ async fn borrow(
                         connection: &'a mut SqliteConnection,
                         item_id: i64|
              -> Pin<
-        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -403,7 +403,7 @@ async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
     } else {
         let items = blaim_db::get_all_itemtrees(&mut *connection).await?;
         let description = try_join_all(items.iter().map(async |(owner, trees)| {
-            Ok::<_, anyhow::Error>(if trees.is_empty() {
+            Ok::<_, color_eyre::eyre::Error>(if trees.is_empty() {
                 "Nothing to see here".to_string()
             } else {
                 format!(
@@ -676,7 +676,7 @@ async fn store(
                         connection: &'a mut SqliteConnection,
                         item_id: i64|
              -> Pin<
-        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -799,7 +799,7 @@ async fn give(
                         connection: &'a mut SqliteConnection,
                         item_id: i64|
              -> Pin<
-        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -852,7 +852,7 @@ async fn give(
 }
 
 #[poise::command(slash_command, subcommands("item_register", "item_delete"))]
-async fn item(_ctx: Context<'_>) -> anyhow::Result<()> {
+async fn item(_ctx: Context<'_>) -> color_eyre::Result<()> {
     Ok(())
 }
 
@@ -862,7 +862,7 @@ async fn item_register(
     ctx: Context<'_>,
     #[description = "Short ID (e.g ffmini2)"] strid: String,
     #[description = "Long descriptor of the item"] name: String,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
@@ -884,7 +884,7 @@ async fn item_delete(
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item: String,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
@@ -915,7 +915,7 @@ async fn item_delete(
                         connection: &'a mut SqliteConnection,
                         item_id: i64|
              -> Pin<
-        Box<dyn Future<Output = anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -1009,7 +1009,7 @@ async fn item_delete(
     rename = "box",
     subcommands("box_info", "box_add", "box_rm")
 )]
-pub async fn r#box(_ctx: Context<'_>) -> anyhow::Result<()> {
+pub async fn r#box(_ctx: Context<'_>) -> color_eyre::Result<()> {
     Ok(())
 }
 
@@ -1019,7 +1019,7 @@ pub async fn box_info(
     #[description = "Box item"]
     #[autocomplete = autocomplete_item]
     r#box: String,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
@@ -1061,12 +1061,12 @@ pub async fn box_info(
 async fn lookup_item_retaining_query(
     item: String,
     pool: &SqlitePool,
-) -> anyhow::Result<(String, Option<blaim_db::Item>)> {
+) -> color_eyre::Result<(String, Option<blaim_db::Item>)> {
     let found = blaim_db::lookup_item(&mut *pool.acquire().await?, &item)
         .await?
         .into_iter()
         .nth(0);
-    anyhow::Ok((item, found))
+    Ok((item, found))
 }
 
 #[poise::command(slash_command, rename = "add")]
@@ -1087,7 +1087,7 @@ pub async fn box_add(
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
@@ -1180,7 +1180,7 @@ pub async fn box_rm(
     #[description = "Item"]
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
-) -> anyhow::Result<()> {
+) -> color_eyre::Result<()> {
     if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
