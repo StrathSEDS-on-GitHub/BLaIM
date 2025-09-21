@@ -160,7 +160,7 @@ async fn get_discord_info(snowflake: u64) -> color_eyre::Result<Member> {
 
 pub async fn get_owner_info(
     conn: &mut PgConnection,
-    mut owner_str: String,
+    owner_str: &str,
 ) -> color_eyre::Result<Owner> {
     if owner_str.starts_with("loc:") {
         let location = lookup_storage(&mut *conn, &owner_str[4..])

@@ -1,6 +1,4 @@
 #![feature(iter_partition_in_place)]
-#![feature(iter_intersperse)]
-#![feature(let_chains)]
 #![feature(closure_lifetime_binder)]
 
 use std::env;
@@ -90,7 +88,7 @@ async fn make_embed(
     alternatives: &[blaim_db::Item],
     (updated_items, present_updates): &(ItemTree, Vec<(blaim_db::Item, blaim_db::Item, bool)>),
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
-    let previous_owner = if let Some(ref owner) = from {
+    let previous_owner = if let Some(owner) = from {
         format_owner(transaction, owner).await
     } else {
         "👻 No one".to_string()
@@ -1255,13 +1253,11 @@ pub async fn box_rm(
 async fn main() -> color_eyre::Result<()> {
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::non_privileged();
 
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect("sqlite://./db.sqlite")
-        .await?;
+    let pool = PgPoolOptions::new().connect_lazy(&db_url)?;
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {

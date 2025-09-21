@@ -1,12 +1,12 @@
 use askama::Template;
 use axum::{
     Router,
-    extract::{self, Path, Query},
+    extract::{self, Path},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
 };
-use blaim_db::{Member, Owner};
+use blaim_db::Owner;
 use color_eyre::eyre::Context;
 use sqlx::PgPool;
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -24,7 +24,7 @@ async fn main() -> color_eyre::Result<()> {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
-    let db_url = std::env::var("DB_URL").wrap_err("DB_URL not set")?;
+    let db_url = std::env::var("DATABASE_URL").wrap_err("DATABASE_URL not set")?;
 
     // build our application with a single route
     let app = Router::new()
@@ -35,9 +35,13 @@ async fn main() -> color_eyre::Result<()> {
             pool: sqlx::Pool::connect_lazy(&db_url).wrap_err("Failed to connect to DB")?,
         });
 
+
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    println!("Serving at 0.0.0.0:8080");
     axum::serve(listener, app).await.unwrap();
+    println!("Bye!");
+
     Ok(())
 }
 
@@ -70,7 +74,7 @@ async fn query_item(
 
     let owner = blaim_db::get_last_holder(&mut *state.pool.acquire().await?, id).await?;
     let owner = if let Some(owner) = owner {
-        blaim_db::get_owner_info(&mut *state.pool.acquire().await?, owner).await?
+        blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?
     } else {
         Owner::Ethereal
     };
@@ -80,7 +84,7 @@ async fn query_item(
         .into_iter()
         .map(async |(owner, dt)| {
             Ok::<_, BlaimError>((
-                blaim_db::get_owner_info(&mut *state.pool.acquire().await?, owner).await?,
+                blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?,
                 dt,
             ))
         });

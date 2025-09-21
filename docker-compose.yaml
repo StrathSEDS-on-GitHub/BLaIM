@@ -2,10 +2,26 @@ services:
   blaim-bot:
     build:
       context: .
-      dockerfile: blaim/Dockerfile
+      dockerfile: Dockerfile
+      target: bot
     container_name: blaim-bot
     environment:
-      DATABASE_URL: postgres://postgres:password@db:5432/postgres
+      DATABASE_URL: postgres://postgres:password@postgres_db:5432/postgres
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+    depends_on:
+      - db
+
+  blaim-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: blaim-web
+    environment:
+      DATABASE_URL: postgres://postgres:password@postgres_db:5432/postgres
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+    ports:
+      - "8080:8080"
     depends_on:
       - db
 
