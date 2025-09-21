@@ -1,0 +1,85 @@
+{% macro show_owner(arg) %}
+
+{% match arg %}
+{% when Owner::Location(loc) %}
+<avatar-container>
+    <img src="/pkg/storage.svg"> <span>{{loc.name}}</span>
+</avatar-container>
+{% when Owner::Member(MemberOwner::Resolved(x)) %}
+{% let avatar_url %}
+{% if x.avatar.is_some() %}
+{% let avatar_url = format!("https://cdn.discordapp.com/avatars/{}/{}.png", x.id, x.avatar.as_ref().unwrap()) %}
+{% else %}
+{% let avatar_url = format!("https://cdn.discordapp.com/embed/avatars/{}.png", (x.id >> 22) % 6) %}
+{% endif %}
+
+{% let display_name = x.nick.as_ref().unwrap_or(&x.username) %}
+
+<avatar-container>
+    <img src="{{avatar_url}}"> <span {% if x.nick.is_some() %} title="{{x.username}}" {% endif
+        %}>{{display_name}}</span>
+</avatar-container>
+{% when Owner::Member(MemberOwner::Unresolved(id)) %}
+<avatar-container>
+    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}" class="unresolved">Unresolved</span>
+</avatar-container>
+{% when Owner::Ethereal %}
+<span>👻 No one?</span>
+{% endmatch %}
+
+{% endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Item Status</title>
+    <link rel="stylesheet" href="../pkg/style.css" />
+</head>
+
+<body>
+    <main>
+        <item-card>
+            <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
+            <item-owner>
+                <p>Held by</p>
+                {% call show_owner(owner) %}
+            </item-owner>
+
+            <borrow-history-container>
+                <h2>Borrow history</h2>
+                <borrow-history>
+                    {% for (borrow, date) in borrow_history %}
+                    <borrow-date title="{{date.format(" %Y-%m-%d %H:%M:%S")}}">
+                        {{ crate::templates::time_since_human_readable(date) }}
+                    </borrow-date>
+                    <borrow-timeline>
+                        <borrow-dot></borrow-dot>
+                        <borrow-line></borrow-line>
+                    </borrow-timeline>
+                    <borrow-owner>
+                        {% call show_owner(borrow) %}
+                    </borrow-owner>
+                    {% endfor %}
+
+                    <!-- Appearance -->
+                    <borrow-date>
+                    </borrow-date>
+                    <borrow-timeline>
+                        <borrow-star>
+                            <img src="/pkg/bigbang.svg" />
+                        </borrow-star>
+                    </borrow-timeline>
+
+                    <borrow-owner>
+                        {{ crate::templates::random_appearance_idiom() }}
+                    </borrow-owner>
+                </borrow-history>
+            </borrow-history-container>
+        </item-card>
+    </main>
+</body>
+
+
+</html>

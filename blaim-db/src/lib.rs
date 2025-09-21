@@ -3,9 +3,11 @@ use std::fmt::{self, Display};
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
+use color_eyre::eyre::Context;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
-use sqlx::{Acquire, Row, PgConnection, PgPool};
+use serde_json::Value;
+use sqlx::{Acquire, PgConnection, PgPool, Row};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Item {
@@ -110,6 +112,85 @@ pub async fn get_item_by_id(
         .fetch_optional(&mut *connection)
         .await?;
     Ok(item)
+}
+
+async fn get_discord_info(snowflake: u64) -> color_eyre::Result<Member> {
+    const SEDS_GUILD_ID: u64 = 755426438185877614;
+
+    let discord_token = std::env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN not set");
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://discord.com/api/v10/guilds/{}/members/{}",
+        SEDS_GUILD_ID, snowflake
+    );
+    let response = client
+        .get(url)
+        .header("Authorization", &format!("Bot {}", discord_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {}
+    let body = response.bytes().await?;
+    let json: Value = serde_json::from_slice(&*body)?;
+    let nick = json.get("nick").and_then(Value::as_str).map(str::to_string);
+    let user = json.get("user").and_then(Value::as_object);
+
+    let id = user
+        .and_then(|u| u.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<u64>().ok());
+    let username = user.and_then(|u| u.get("username")).and_then(Value::as_str);
+
+    let avatar = user
+        .and_then(|u| u.get("avatar"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    if let (Some(id), Some(username)) = (id, username) {
+        Ok(Member {
+            id,
+            username: username.to_string(),
+            nick,
+            avatar,
+        })
+    } else {
+        Err(color_eyre::eyre::eyre!("Malformed Discord response"))
+    }
+}
+
+pub async fn get_owner_info(
+    conn: &mut PgConnection,
+    mut owner_str: String,
+) -> color_eyre::Result<Owner> {
+    if owner_str.starts_with("loc:") {
+        let location = lookup_storage(&mut *conn, &owner_str[4..])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or(color_eyre::eyre::eyre!("No such location"))?;
+
+        Ok(Owner::Location(location))
+    } else {
+        // Owned by a user
+        let snowflake = owner_str.parse::<u64>().wrap_err("Non snowflake in DB")?;
+        if let Some(owner) = find_member_info(&mut *conn, snowflake).await?.map(|it| {
+            if it.username != "#unresolved" {
+                Owner::Member(MemberOwner::Resolved(it))
+            } else {
+                Owner::Member(MemberOwner::Unresolved(snowflake))
+            }
+        }) {
+            Ok(owner)
+        } else {
+            if let Ok(member) = get_discord_info(snowflake).await {
+                // Cache this info
+                insert_member_info(&mut *conn, &member).await?;
+                Ok(Owner::Member(MemberOwner::Resolved(member)))
+            } else {
+                Ok(Owner::Member(MemberOwner::Unresolved(snowflake)))
+            }
+        }
+    }
 }
 
 pub async fn get_last_holder(
@@ -709,4 +790,76 @@ pub async fn list_storage(
     }
 
     Ok(itemtrees)
+}
+
+#[derive(Debug, Clone)]
+pub struct Member {
+    pub id: u64,
+    pub nick: Option<String>,
+    pub username: String,
+    pub avatar: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MemberOwner {
+    Resolved(Member),
+    Unresolved(u64),
+}
+
+#[derive(Debug, Clone)]
+pub enum Owner {
+    Location(Location),
+    Member(MemberOwner),
+    Ethereal,
+}
+
+pub async fn find_member_info(
+    conn: &mut PgConnection,
+    snowflake: u64,
+) -> color_eyre::Result<Option<Member>> {
+    struct ShittyI64Member {
+        id: i64,
+        nick: Option<String>,
+        username: String,
+        avatar: Option<String>,
+    }
+
+    let i64_member = sqlx::query_as!(
+        ShittyI64Member,
+        "SELECT * FROM members WHERE id = $1",
+        snowflake as i64
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(i64_member.map(
+        |ShittyI64Member {
+             id,
+             nick,
+             username,
+             avatar,
+         }| Member {
+            id: id as u64,
+            nick,
+            username,
+            avatar,
+        },
+    ))
+}
+
+pub async fn insert_member_info(
+    conn: &mut PgConnection,
+    member: &Member,
+) -> color_eyre::Result<()> {
+    sqlx::query!(
+        "INSERT INTO members (id, nick, username, avatar) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (id) DO UPDATE SET nick = EXCLUDED.nick, username = EXCLUDED.username, avatar = EXCLUDED.avatar;",
+        member.id as i64,
+        member.nick,
+        member.username,
+        member.avatar,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
 }

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO members (id, nick, username, avatar) VALUES ($1, $2, $3, $4)\n        ON CONFLICT (id) DO UPDATE SET nick = EXCLUDED.nick, username = EXCLUDED.username, avatar = EXCLUDED.avatar;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0453e2d43af49ca67289102b45469b2d59ad01072550ea82f9e8cc6ac6e3c049"
+}
