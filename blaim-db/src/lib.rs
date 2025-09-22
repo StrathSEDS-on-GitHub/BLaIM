@@ -691,6 +691,15 @@ pub async fn box_contents(
     Ok(root)
 }
 
+pub async fn get_all_items(
+    conn: &mut PgConnection
+) -> color_eyre::Result<Vec<Item>> {
+    let items = sqlx::query_as!(Item, "SELECT id, strid, name FROM items;")
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(items)
+}
+
 pub async fn get_all_itemtrees(
     connection: &mut PgConnection,
 ) -> color_eyre::Result<HashMap<Option<String>, Vec<ItemTree>>> {

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLaIM</title>
+    <link rel="stylesheet" href="../pkg/style-index.css" />
+</head>
+
+<body>
+    <logo>
+        <img src="/pkg/strathseds.svg"/>
+    </logo>
+
+    <main>
+        <h1>StrathSEDS 
+            <br>
+            <span style="font-weight: 400;">Logistics & Inventory</span></h1>
+        <searches>
+            <h3>Search by item</h3>
+            <form action="javascript:searchItem()" method="get">
+                <datalist id="items">
+                    {% for item in items %}
+                    <option value="{{ item.name }}"></option>
+                    {% endfor %}
+                </datalist>
+                <input type="text" placeholder="Item" required list="items" />
+                <button type="submit">Search</button>
+            </form>
+        </searches>
+        
+    </main>
+
+    <script>
+        function searchItem() {
+            const form = document.querySelector("form");
+            const input = form.querySelector("input");
+            const item = input.value.trim();
+            if (item) {
+                const encodedItem = encodeURIComponent(item);
+                window.location.href = `/item/${encodedItem}`;
+            }
+        }
+    </script>
+</body>
+</html>

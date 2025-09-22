@@ -35,7 +35,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Item Status</title>
-    <link rel="stylesheet" href="../pkg/style.css" />
+    <link rel="stylesheet" href="/pkg/style.css" />
 </head>
 
 <body>
@@ -79,6 +79,14 @@
             </borrow-history-container>
         </item-card>
     </main>
+
+    <script>
+        // URL is /item/<item name>/id
+        const canonical_item_name = "{{ item.name }}";
+        const item_id = "{{ item.id }}";
+        const new_url = `/item/${encodeURIComponent(canonical_item_name)}/${item_id}`;
+        window.history.replaceState(null, '', new_url);
+    </script>
 </body>
 
 

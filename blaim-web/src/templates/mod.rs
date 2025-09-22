@@ -2,6 +2,7 @@ use rand::seq::IndexedRandom;
 use sqlx::types::chrono::{DateTime, Utc};
 
 pub(crate) mod item_status;
+pub(crate) mod home;
 
 const APPEARANCE_IDIOMS: &[&str] = &[
     "Spontaneously coalesces from the quantum foam",

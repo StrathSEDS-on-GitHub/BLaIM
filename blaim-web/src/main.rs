@@ -1,7 +1,7 @@
 use askama::Template;
 use axum::{
     Router,
-    extract::{self, Path},
+    extract::{self, Path, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
@@ -28,13 +28,14 @@ async fn main() -> color_eyre::Result<()> {
 
     // build our application with a single route
     let app = Router::new()
-        .route("/item/{:id}", get(query_item))
+        .route("/", get(home))
+        .route("/item/{:name}", get(query_item_search))
+        .route("/item/{:name}/{:id}", get(query_item))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .layer(TraceLayer::new_for_http())
         .with_state(AppState {
             pool: sqlx::Pool::connect_lazy(&db_url).wrap_err("Failed to connect to DB")?,
         });
-
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
@@ -64,10 +65,25 @@ impl IntoResponse for BlaimError {
 }
 
 #[axum::debug_handler]
+async fn query_item_search(
+    extract::State(state): extract::State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, BlaimError> {
+    let items = blaim_db::lookup_item(&mut *state.pool.acquire().await?, &name).await?;
+
+    if items.is_empty() {
+        return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
+    }
+    let item = &items[0];
+
+    query_item(extract::State(state), Path((name, item.id))).await
+}
+
+#[axum::debug_handler]
 async fn query_item(
     extract::State(state): extract::State<AppState>,
-    Path(id): Path<i32>,
-) -> Result<impl IntoResponse, BlaimError> {
+    Path((_name, id)): Path<(String, i32)>,
+) -> Result<(StatusCode, Html<String>), BlaimError> {
     let Some(item) = blaim_db::get_item_by_id(&mut *state.pool.acquire().await?, id).await? else {
         return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
     };
@@ -98,4 +114,9 @@ async fn query_item(
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))
+}
+
+async fn home(state: State<AppState>) -> Result<impl IntoResponse, BlaimError> {
+    let items = blaim_db::get_all_items(&mut *state.pool.acquire().await?).await?;
+    Ok(Html(templates::home::Home { items }.render()?))
 }

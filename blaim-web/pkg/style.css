@@ -162,16 +162,18 @@ item-card {
     }
 }
 
-@media screen and (width <=800px) {
+@media screen and (width <= 800px) {
     item-card {
-        grid-template-columns: auto;
+        grid-template-columns: 1fr;
 
         item-info {
             text-align: center;
+            grid-column: 1/1;
         }
 
         item-owner {
             margin: auto;
+            grid-column: 1/1;
         }
     }
 }
