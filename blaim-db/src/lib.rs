@@ -233,20 +233,20 @@ pub async fn borrow_item(
 
     // Mark items as present if the parent is owned by the borrower
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
-        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent IN (");
+        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent = any (array[");
         let mut sep = builder.separated(",");
         owned_items.iter().for_each(|it| {
             sep.push_bind(it);
         });
         builder
-            .push(")) WHERE child = ")
+            .push("]::integer[])) WHERE child = ")
             .push_bind(node.item.id)
-            .push(" AND present != (parent IN (");
+            .push(" AND present != (parent = any (array[");
         let mut sep = builder.separated(",");
         owned_items.iter().for_each(|it| {
             sep.push_bind(it);
         });
-        builder.push(")) RETURNING parent, present;");
+        builder.push("]::integer[])) RETURNING parent, present;");
 
         let query = builder.build();
         let result = query.fetch_optional(&mut *connection).await?;
@@ -265,7 +265,7 @@ pub async fn borrow_item(
         builder
             .push("WHERE child = ")
             .push_bind(owned_item)
-            .push(" AND (parent IN (");
+            .push(" AND (parent = any (array[");
         let mut sep = builder.separated(",");
         items
             .iter_depth_first()
@@ -273,7 +273,7 @@ pub async fn borrow_item(
             .for_each(|(_, node, _)| {
                 sep.push_bind(node.item.id);
             });
-        builder.push(")) AND present = 0 RETURNING parent, present;");
+        builder.push("]::integer[])) AND present = 0 RETURNING parent, present;");
 
         let query = builder.build();
         let result = query.fetch_optional(&mut *connection).await?;
