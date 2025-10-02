@@ -18,4 +18,5 @@ CMD ["./bin/blaim"]
 
 FROM blaim-builder AS web
 EXPOSE 8080
-CMD ["./bin/blaim-web"]
+WORKDIR /app/blaim-web
+CMD ["/app/bin/blaim-web"]
