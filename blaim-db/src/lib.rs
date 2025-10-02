@@ -261,7 +261,7 @@ pub async fn borrow_item(
 
     // Mark items owned by the borrower as present if the parent is being borrowed
     for owned_item in owned_items.iter() {
-        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = 1 ");
+        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = true ");
         builder
             .push("WHERE child = ")
             .push_bind(owned_item)
@@ -273,7 +273,7 @@ pub async fn borrow_item(
             .for_each(|(_, node, _)| {
                 sep.push_bind(node.item.id);
             });
-        builder.push("]::integer[])) AND present = 0 RETURNING parent, present;");
+        builder.push("]::integer[])) AND present = false RETURNING parent, present;");
 
         let query = builder.build();
         let result = query.fetch_optional(&mut *connection).await?;
