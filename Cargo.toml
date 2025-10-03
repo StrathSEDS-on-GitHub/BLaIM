@@ -1,22 +1,21 @@
 [workspace]
-members = [
-    "blaim",
-    "blaim-db",
-    "blaim-web",
-]
+members = ["blaim", "blaim-db", "blaim-web"]
 resolver = "3"
 
 [workspace.dependencies]
 color-eyre = "0.6.5"
 
 [workspace.dependencies.sqlx]
-version = "0.7.4"
-features = [
-    "runtime-tokio",
-    "postgres",
-    "chrono",
-]
+version = "0.8.6"
+features = ["runtime-tokio", "postgres", "time"]
 
 [workspace.dependencies.tokio]
 version = "1.37.0"
 features = ["full"]
+
+[workspace.dependencies.time]
+version = "0.3.44"
+
+[workspace.dependencies.serde]
+version = "1.0.225"
+features = ["derive"]

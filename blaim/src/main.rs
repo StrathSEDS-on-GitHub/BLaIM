@@ -15,8 +15,9 @@ use serenity::all::{
 use serenity::futures::future::try_join_all;
 use serenity::prelude::*;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::types::chrono;
+use sqlx::types::time::OffsetDateTime;
 use sqlx::{Acquire, PgConnection, PgPool};
+use ::time::format_description::well_known::Rfc2822;
 
 struct Data {
     pool: PgPool,
@@ -29,6 +30,7 @@ const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
 
 async fn format_owner(connection: &mut PgConnection, owner: &str) -> String {
     if let Some(owner) = owner.strip_prefix("loc:") {
+        println!("Looking up location '{}'", owner);
         format!(
             "{}",
             blaim_db::find_location_name(connection, owner)
@@ -105,7 +107,7 @@ async fn make_embed(
             ":red_square: **-** {} \n:arrow_down:\n:green_square: **+** {}",
             previous_owner, new_owner
         ))
-        .footer(CreateEmbedFooter::new(chrono::Utc::now().to_rfc2822()));
+        .footer(CreateEmbedFooter::new(OffsetDateTime::now_utc().format(&Rfc2822).unwrap()));
 
     let boxed_items_count = updated_items.iter_depth_first().collect::<Vec<_>>().len() - 1;
     if boxed_items_count > 0 {
@@ -488,7 +490,7 @@ async fn blame(
             format!(
                 "{} since <t:{}:R>",
                 format_owner(&mut *connection, &history.first().unwrap().0).await,
-                history.first().unwrap().1.timestamp()
+                history.first().unwrap().1.unix_timestamp()
             ),
             true,
         )
@@ -505,14 +507,13 @@ async fn blame(
             .skip(1)
             .chain(std::iter::once("👻".to_string()))
             .collect();
-        println!("from_col: {:?}", from_column.clone());
         let to_column: String = borrowers
             .clone()
             .map(|x| format!(":right_arrow:{}{}", "\x7f ".repeat(6), x))
             .collect();
         let time_column = history
             .iter()
-            .map(|(_, time)| format!("<t:{}:R>\n", time.timestamp()))
+            .map(|(_, time)| format!("<t:{}:R>\n", time.unix_timestamp()))
             .collect::<String>();
         embed = embed
             .field("From", from_column, true)
@@ -703,6 +704,8 @@ async fn store(
         items: items.clone(),
         location: format!("loc:{}", location.strid),
     };
+
+    println!("Storing item {} in location '{}'", selected.name, location.strid);
 
     let (embed, components) = task(&state, &mut *transaction, selected.id).await?;
     let reply = CreateReply::default()
@@ -1284,7 +1287,6 @@ async fn main() -> color_eyre::Result<()> {
                         GuildId::from(*guild_id),
                     )
                     .await?;
-                    println!(" ok");
                 }
                 Ok(Data { pool })
             })

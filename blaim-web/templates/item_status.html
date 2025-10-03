@@ -21,7 +21,8 @@
 </avatar-container>
 {% when Owner::Member(MemberOwner::Unresolved(id)) %}
 <avatar-container>
-    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}" class="unresolved">Unresolved</span>
+    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}"
+        class="unresolved">Unresolved</span>
 </avatar-container>
 {% when Owner::Ethereal %}
 <span>👻 No one?</span>
@@ -47,11 +48,23 @@
                 {% call show_owner(owner) %}
             </item-owner>
 
+            <actions>
+                {% match session %}
+                {% when BlaimSession::Challenged { state, at, redirect } %}
+                <a
+                    href="https://discord.com/oauth2/authorize?client_id=1239583904554549258&response_type=code&redirect_uri={{ redirect | urlencode_strict }}&scope=identify&state={{ state }}">
+                    Sign in with Discord
+                </a>
+                {% when BlaimSession::Authenticated { member } %}
+                 {% call show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
+                {% endmatch %}
+            </actions>
+
             <borrow-history-container>
                 <h2>Borrow history</h2>
                 <borrow-history>
                     {% for (borrow, date) in borrow_history %}
-                    <borrow-date title="{{date.format(" %Y-%m-%d %H:%M:%S")}}">
+                    <borrow-date title="{{date.format(&Rfc2822).unwrap()}}">
                         {{ crate::templates::time_since_human_readable(date) }}
                     </borrow-date>
                     <borrow-timeline>

@@ -1,8 +1,8 @@
 use rand::seq::IndexedRandom;
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::time::OffsetDateTime;
 
-pub(crate) mod item_status;
 pub(crate) mod home;
+pub(crate) mod item_status;
 
 const APPEARANCE_IDIOMS: &[&str] = &[
     "Spontaneously coalesces from the quantum foam",
@@ -16,7 +16,7 @@ const APPEARANCE_IDIOMS: &[&str] = &[
     "Crosses the threshold of theoretical availability into operational reality",
 ];
 
-pub(crate) fn time_since_human_readable(since: &DateTime<Utc>) -> String {
+pub(crate) fn time_since_human_readable(since: &OffsetDateTime) -> String {
     macro_rules! pluralize {
         ($duration:ident, $word:literal) => {
             if $duration == 1 {
@@ -27,28 +27,28 @@ pub(crate) fn time_since_human_readable(since: &DateTime<Utc>) -> String {
         };
     }
 
-    let now = Utc::now();
-    let duration = now.signed_duration_since(since);
-    if duration.num_days() > 365 {
-        let years = duration.num_days() / 365;
+    let now = OffsetDateTime::now_utc();
+    let duration = now - *since;
+    let days = duration.whole_days();
+    let hours = duration.whole_hours();
+    let minutes = duration.whole_minutes();
+    let seconds = duration.whole_seconds();
+    if days > 365 {
+        let years = days / 365;
         pluralize!(years, "year")
-    } else if duration.num_days() > 30 {
-        let months = duration.num_days() / 30;
+    } else if days > 30 {
+        let months = days / 30;
         pluralize!(months, "month")
-    } else if duration.num_days() > 7 {
-        let weeks = duration.num_days() / 7;
+    } else if days > 7 {
+        let weeks = days / 7;
         pluralize!(weeks, "week")
-    } else if duration.num_days() > 0 {
-        let days = duration.num_days();
+    } else if days > 0 {
         pluralize!(days, "day")
-    } else if duration.num_hours() > 0 {
-        let hours = duration.num_hours();
+    } else if hours > 0 {
         pluralize!(hours, "hour")
-    } else if duration.num_minutes() > 0 {
-        let minutes = duration.num_minutes();
+    } else if minutes > 0 {
         pluralize!(minutes, "minute")
     } else {
-        let seconds = duration.num_seconds();
         pluralize!(seconds, "second")
     }
 }

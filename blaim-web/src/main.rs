@@ -8,9 +8,16 @@ use axum::{
 };
 use blaim_db::Owner;
 use color_eyre::eyre::Context;
+use rand::{Rng, distr::Alphanumeric};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use tower_http::{services::ServeDir, trace::TraceLayer};
+use tower_sessions::{Session, cookie::SameSite};
 
+use crate::{oauth::authorize, session::BlaimSession};
+
+mod oauth;
+mod session;
 mod templates;
 
 #[derive(Clone)]
@@ -26,16 +33,21 @@ async fn main() -> color_eyre::Result<()> {
 
     let db_url = std::env::var("DATABASE_URL").wrap_err("DATABASE_URL not set")?;
 
+    let pool = sqlx::Pool::connect_lazy(&db_url).wrap_err("Failed to connect to DB")?;
+
+    let storage = tower_sessions_sqlx_store::PostgresStore::new(pool.clone());
+    storage.migrate().await?;
+
     // build our application with a single route
     let app = Router::new()
         .route("/", get(home))
         .route("/item/{:name}", get(query_item_search))
         .route("/item/{:name}/{:id}", get(query_item))
+        .route("/authorize", get(authorize))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .layer(TraceLayer::new_for_http())
-        .with_state(AppState {
-            pool: sqlx::Pool::connect_lazy(&db_url).wrap_err("Failed to connect to DB")?,
-        });
+        .layer(tower_sessions::SessionManagerLayer::new(storage).with_same_site(SameSite::Lax))
+        .with_state(AppState { pool });
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
@@ -66,6 +78,7 @@ impl IntoResponse for BlaimError {
 
 #[axum::debug_handler]
 async fn query_item_search(
+    session: Session,
     extract::State(state): extract::State<AppState>,
     Path(name): Path<String>,
 ) -> Result<impl IntoResponse, BlaimError> {
@@ -76,14 +89,51 @@ async fn query_item_search(
     }
     let item = &items[0];
 
-    query_item(extract::State(state), Path((name, item.id))).await
+    query_item(session, extract::State(state), Path((name, item.id))).await
 }
 
 #[axum::debug_handler]
 async fn query_item(
+    session: Session,
     extract::State(state): extract::State<AppState>,
     Path((_name, id)): Path<(String, i32)>,
 ) -> Result<(StatusCode, Html<String>), BlaimError> {
+    let auth: Option<BlaimSession> = session.get("session").await.ok().flatten();
+
+    let auth = match auth {
+        Some(session @ BlaimSession::Authenticated { .. }) => session,
+        Some(session @ BlaimSession::Challenged { at, .. })
+            if (OffsetDateTime::now_utc() - at).whole_minutes() < 5 =>
+        {
+            session
+        }
+        _ => {
+            let oauth_state = rand::rng()
+                .sample_iter(Alphanumeric)
+                .take(64)
+                .map(char::from)
+                .collect();
+            let auth = BlaimSession::Challenged {
+                at: OffsetDateTime::now_utc(),
+                state: oauth_state,
+                redirect: {
+                    #[cfg(debug_assertions)]
+                    {
+                        "http://localhost:8080/authorize"
+                    }
+
+                    #[cfg(not(debug_assertions))]
+                    {
+                        "https://blaim.strathseds.org/authorize"
+                    }
+                }
+                .to_string(),
+            };
+            session.insert("session", &auth).await?;
+            auth
+        }
+    };
+
     let Some(item) = blaim_db::get_item_by_id(&mut *state.pool.acquire().await?, id).await? else {
         return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
     };
@@ -111,6 +161,7 @@ async fn query_item(
         item,
         owner,
         borrow_history,
+        session: auth,
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))

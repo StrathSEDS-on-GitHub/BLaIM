@@ -2,11 +2,12 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 use std::sync::LazyLock;
 
-use chrono::{DateTime, Utc};
 use color_eyre::eyre::Context;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::types::time::{OffsetDateTime, PrimitiveDateTime};
 use sqlx::{Acquire, PgConnection, PgPool, Row};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -158,10 +159,7 @@ async fn get_discord_info(snowflake: u64) -> color_eyre::Result<Member> {
     }
 }
 
-pub async fn get_owner_info(
-    conn: &mut PgConnection,
-    owner_str: &str,
-) -> color_eyre::Result<Owner> {
+pub async fn get_owner_info(conn: &mut PgConnection, owner_str: &str) -> color_eyre::Result<Owner> {
     if owner_str.starts_with("loc:") {
         let location = lookup_storage(&mut *conn, &owner_str[4..])
             .await?
@@ -173,23 +171,7 @@ pub async fn get_owner_info(
     } else {
         // Owned by a user
         let snowflake = owner_str.parse::<u64>().wrap_err("Non snowflake in DB")?;
-        if let Some(owner) = find_member_info(&mut *conn, snowflake).await?.map(|it| {
-            if it.username != "#unresolved" {
-                Owner::Member(MemberOwner::Resolved(it))
-            } else {
-                Owner::Member(MemberOwner::Unresolved(snowflake))
-            }
-        }) {
-            Ok(owner)
-        } else {
-            if let Ok(member) = get_discord_info(snowflake).await {
-                // Cache this info
-                insert_member_info(&mut *conn, &member).await?;
-                Ok(Owner::Member(MemberOwner::Resolved(member)))
-            } else {
-                Ok(Owner::Member(MemberOwner::Unresolved(snowflake)))
-            }
-        }
+        try_resolve_member(conn, snowflake).await.map(Owner::Member)
     }
 }
 
@@ -211,7 +193,10 @@ pub async fn borrow_item(
     item: &Item,
     user: &str,
 ) -> color_eyre::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
-    let now = sqlx::types::chrono::Utc::now().naive_utc();
+    let now = PrimitiveDateTime::new(
+        OffsetDateTime::now_utc().date(),
+        OffsetDateTime::now_utc().time(),
+    );
     let items = box_contents(connection, item).await?;
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
         sqlx::query!(
@@ -233,7 +218,8 @@ pub async fn borrow_item(
 
     // Mark items as present if the parent is owned by the borrower
     for (_, node, _) in items.iter_depth_first().filter(|(_, node, _)| node.present) {
-        let mut builder = sqlx::QueryBuilder::new("UPDATE meta SET present = (parent = any (array[");
+        let mut builder =
+            sqlx::QueryBuilder::new("UPDATE meta SET present = (parent = any (array[");
         let mut sep = builder.separated(",");
         owned_items.iter().for_each(|it| {
             sep.push_bind(it);
@@ -300,7 +286,7 @@ pub async fn borrow_item(
 pub async fn borrow_history(
     connection: &mut PgConnection,
     item_id: i32,
-) -> color_eyre::Result<Vec<(String, DateTime<Utc>)>> {
+) -> color_eyre::Result<Vec<(String, OffsetDateTime)>> {
     let history = sqlx::query!(
         "SELECT to_user, time FROM borrow WHERE item_id = $1 ORDER BY ordering DESC",
         item_id
@@ -312,7 +298,7 @@ pub async fn borrow_history(
         .map(|row| {
             (
                 row.to_user,
-                DateTime::from_naive_utc_and_offset(row.time, Utc),
+                OffsetDateTime::new_utc(row.time.date(), row.time.time()),
             )
         })
         .collect())
@@ -691,9 +677,7 @@ pub async fn box_contents(
     Ok(root)
 }
 
-pub async fn get_all_items(
-    conn: &mut PgConnection
-) -> color_eyre::Result<Vec<Item>> {
+pub async fn get_all_items(conn: &mut PgConnection) -> color_eyre::Result<Vec<Item>> {
     let items = sqlx::query_as!(Item, "SELECT id, strid, name FROM items;")
         .fetch_all(&mut *conn)
         .await?;
@@ -801,7 +785,7 @@ pub async fn list_storage(
     Ok(itemtrees)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
     pub id: u64,
     pub nick: Option<String>,
@@ -822,7 +806,33 @@ pub enum Owner {
     Ethereal,
 }
 
-pub async fn find_member_info(
+pub async fn try_resolve_member(
+    conn: &mut PgConnection,
+    snowflake: u64,
+) -> color_eyre::Result<MemberOwner> {
+    if let Some(owner) = find_cached_member_info(&mut *conn, snowflake)
+        .await?
+        .map(|it| {
+            if it.username != "#unresolved" {
+                MemberOwner::Resolved(it)
+            } else {
+                MemberOwner::Unresolved(snowflake)
+            }
+        })
+    {
+        Ok(owner)
+    } else {
+        if let Ok(member) = get_discord_info(snowflake).await {
+            // Cache this info
+            cache_member_info(&mut *conn, &member).await?;
+            Ok(MemberOwner::Resolved(member))
+        } else {
+            Ok(MemberOwner::Unresolved(snowflake))
+        }
+    }
+}
+
+pub async fn find_cached_member_info(
     conn: &mut PgConnection,
     snowflake: u64,
 ) -> color_eyre::Result<Option<Member>> {
@@ -856,10 +866,7 @@ pub async fn find_member_info(
     ))
 }
 
-pub async fn insert_member_info(
-    conn: &mut PgConnection,
-    member: &Member,
-) -> color_eyre::Result<()> {
+pub async fn cache_member_info(conn: &mut PgConnection, member: &Member) -> color_eyre::Result<()> {
     sqlx::query!(
         "INSERT INTO members (id, nick, username, avatar) VALUES ($1, $2, $3, $4)
         ON CONFLICT (id) DO UPDATE SET nick = EXCLUDED.nick, username = EXCLUDED.username, avatar = EXCLUDED.avatar;",
