@@ -95,6 +95,53 @@ item-card {
     }
 
 
+    actions {
+        grid-column: 1 / span 2;
+        border-radius: 20px;
+        padding: 30px;
+        display: flex;
+        width: 100%;
+        justify-content: space-evenly;
+
+        form > button {
+            height: 100%;
+            color: #92d8c6;
+            border: 1px solid #92d8c6;
+            padding: 3px 12px 3px 12px;
+            border-radius: 20px;
+            background-color: transparent;
+            cursor: pointer;
+            transition: all 0.1s;
+            min-width: 150px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+
+            &:hover {
+                outline: 1px solid #92d8c6;
+                background-color: #283138;
+            }
+
+            h4 {
+                font-weight: 600;
+                margin: 0;
+                font-size: 0.8em;
+            }
+
+
+            avatar-container {
+                font-size: 0.8em;
+                font-weight: 600;
+                img {
+                    max-height: 22px;
+                }
+            }
+        }
+
+    }
+
+
     borrow-history-container {
         grid-column: 1 / span 2;
         margin: auto;
@@ -162,7 +209,7 @@ item-card {
     }
 }
 
-@media screen and (width <= 800px) {
+@media screen and (width <=800px) {
     item-card {
         grid-template-columns: 1fr;
 

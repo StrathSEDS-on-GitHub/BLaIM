@@ -57,3 +57,15 @@ pub(crate) fn random_appearance_idiom() -> &'static str {
     let mut rng = rand::rng();
     APPEARANCE_IDIOMS.choose(&mut rng).copied().unwrap()
 }
+
+pub const OAUTH_REDIRECT_URI: &str = {
+    #[cfg(not(debug_assertions))]
+    {
+        "https://blaim.strathseds.org/authorize"
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        "http://localhost:8080/authorize"
+    }
+};

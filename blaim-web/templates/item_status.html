@@ -52,11 +52,16 @@
                 {% match session %}
                 {% when BlaimSession::Challenged { state, at, redirect } %}
                 <a
-                    href="https://discord.com/oauth2/authorize?client_id=1239583904554549258&response_type=code&redirect_uri={{ redirect | urlencode_strict }}&scope=identify&state={{ state }}">
+                    href="https://discord.com/oauth2/authorize?client_id=1239583904554549258&response_type=code&redirect_uri={{ crate::templates::OAUTH_REDIRECT_URI | urlencode_strict }}&scope=identify&state={{ state }}">
                     Sign in with Discord
                 </a>
                 {% when BlaimSession::Authenticated { member } %}
-                 {% call show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
+                <form>
+                    <button formaction="/borrow/{{ item.id }}/{{ member.id }}" formmethod="post">Borrow as
+                        {% call show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
+                    </button>
+                </form>
+
                 {% endmatch %}
             </actions>
 

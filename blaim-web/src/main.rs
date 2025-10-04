@@ -1,22 +1,19 @@
 use askama::Template;
 use axum::{
     Router,
-    extract::{self, Path, State},
+    extract::State,
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
 };
-use blaim_db::Owner;
 use color_eyre::eyre::Context;
-use rand::{Rng, distr::Alphanumeric};
 use sqlx::PgPool;
-use time::OffsetDateTime;
 use tower_http::{services::ServeDir, trace::TraceLayer};
-use tower_sessions::{Session, cookie::SameSite};
+use tower_sessions::cookie::SameSite;
 
-use crate::{oauth::authorize, session::BlaimSession};
+use crate::routes::{authorize, query_item, query_item_search};
 
-mod oauth;
+mod routes;
 mod session;
 mod templates;
 
@@ -74,97 +71,6 @@ impl IntoResponse for BlaimError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("{:#}", self.0)).into_response()
     }
-}
-
-#[axum::debug_handler]
-async fn query_item_search(
-    session: Session,
-    extract::State(state): extract::State<AppState>,
-    Path(name): Path<String>,
-) -> Result<impl IntoResponse, BlaimError> {
-    let items = blaim_db::lookup_item(&mut *state.pool.acquire().await?, &name).await?;
-
-    if items.is_empty() {
-        return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
-    }
-    let item = &items[0];
-
-    query_item(session, extract::State(state), Path((name, item.id))).await
-}
-
-#[axum::debug_handler]
-async fn query_item(
-    session: Session,
-    extract::State(state): extract::State<AppState>,
-    Path((_name, id)): Path<(String, i32)>,
-) -> Result<(StatusCode, Html<String>), BlaimError> {
-    let auth: Option<BlaimSession> = session.get("session").await.ok().flatten();
-
-    let auth = match auth {
-        Some(session @ BlaimSession::Authenticated { .. }) => session,
-        Some(session @ BlaimSession::Challenged { at, .. })
-            if (OffsetDateTime::now_utc() - at).whole_minutes() < 5 =>
-        {
-            session
-        }
-        _ => {
-            let oauth_state = rand::rng()
-                .sample_iter(Alphanumeric)
-                .take(64)
-                .map(char::from)
-                .collect();
-            let auth = BlaimSession::Challenged {
-                at: OffsetDateTime::now_utc(),
-                state: oauth_state,
-                redirect: {
-                    #[cfg(debug_assertions)]
-                    {
-                        "http://localhost:8080/authorize"
-                    }
-
-                    #[cfg(not(debug_assertions))]
-                    {
-                        "https://blaim.strathseds.org/authorize"
-                    }
-                }
-                .to_string(),
-            };
-            session.insert("session", &auth).await?;
-            auth
-        }
-    };
-
-    let Some(item) = blaim_db::get_item_by_id(&mut *state.pool.acquire().await?, id).await? else {
-        return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
-    };
-
-    let owner = blaim_db::get_last_holder(&mut *state.pool.acquire().await?, id).await?;
-    let owner = if let Some(owner) = owner {
-        blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?
-    } else {
-        Owner::Ethereal
-    };
-
-    let borrow_history = blaim_db::borrow_history(&mut *state.pool.acquire().await?, item.id)
-        .await?
-        .into_iter()
-        .map(async |(owner, dt)| {
-            Ok::<_, BlaimError>((
-                blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?,
-                dt,
-            ))
-        });
-
-    let borrow_history = futures::future::try_join_all(borrow_history).await?;
-
-    let template = templates::item_status::ItemStatusTemplate {
-        item,
-        owner,
-        borrow_history,
-        session: auth,
-    };
-
-    Ok((StatusCode::OK, Html(template.render()?)))
 }
 
 async fn home(state: State<AppState>) -> Result<impl IntoResponse, BlaimError> {

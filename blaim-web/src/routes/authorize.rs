@@ -1,7 +1,7 @@
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::Html,
+    response::{Html, IntoResponse, Redirect, Response},
 };
 use blaim_db::try_resolve_member;
 use color_eyre::eyre::eyre;
@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use tower_sessions::Session;
 use tracing::info;
 
-use crate::{AppState, BlaimError, session::BlaimSession};
+use crate::{AppState, BlaimError, session::BlaimSession, templates::OAUTH_REDIRECT_URI};
 
 #[derive(serde::Deserialize)]
 pub struct AuthorizeQuery {
@@ -18,11 +18,12 @@ pub struct AuthorizeQuery {
     state: String,
 }
 
+#[axum::debug_handler]
 pub async fn authorize(
     session: Session,
     State(app_state): State<AppState>,
     Query(AuthorizeQuery { code, state }): Query<AuthorizeQuery>,
-) -> Result<(StatusCode, Html<String>), BlaimError> {
+) -> Result<Response, BlaimError> {
     info!(
         "Received OAuth callback with code: {}, state: {}",
         code, state
@@ -38,15 +39,15 @@ pub async fn authorize(
         redirect,
     }): Option<BlaimSession> = session.get("session").await.ok().flatten()
     else {
-        return Ok((StatusCode::FORBIDDEN, Html("Invalid session.".to_owned())));
+        return Ok((StatusCode::FORBIDDEN, Html("Invalid session.")).into_response());
     };
 
     if (OffsetDateTime::now_utc() - at).whole_minutes() >= 5 {
-        return Ok((StatusCode::FORBIDDEN, Html("Session expired.".to_owned())));
+        return Ok((StatusCode::FORBIDDEN, Html("Session expired.")).into_response());
     }
 
     if state != state_ve {
-        return Ok((StatusCode::FORBIDDEN, Html("Invalid state.".to_owned())));
+        return Ok((StatusCode::FORBIDDEN, Html("Invalid state.")).into_response());
     }
 
     // Exchange code for token
@@ -57,8 +58,10 @@ pub async fn authorize(
             "client_id=1239583904554549258&client_secret={}&grant_type=authorization_code&code={}&redirect_uri={}",
             std::env::var("DISCORD_CLIENT_SECRET").expect("DISCORD_CLIENT_SECRET must be set"),
             code,
-            askama::filters::urlencode_strict(&redirect).unwrap()
+            askama::filters::urlencode_strict(OAUTH_REDIRECT_URI).unwrap()
         )).send().await?.json::<serde_json::Value>().await?;
+
+    info!("Discord token response: {:?}", response);
 
     let access_token = response
         .get("access_token")
@@ -85,21 +88,13 @@ pub async fn authorize(
     let blaim_db::MemberOwner::Resolved(member) = member else {
         return Ok((
             StatusCode::FORBIDDEN,
-            Html("Please join the <a href=\"https://strathseds.org/discord\">StrathSEDS discord.</a>".to_owned())
-        ));
+            Html("Please join the <a href=\"https://strathseds.org/discord\">StrathSEDS discord.</a>".to_owned())).into_response()
+        );
     };
-
-    let result = Ok((
-        StatusCode::OK,
-        Html(format!(
-            "Successfully authenticated as {}",
-            member.nick.as_ref().unwrap_or(&member.username)
-        )),
-    ));
 
     session
         .insert("session", BlaimSession::Authenticated { member })
         .await?;
 
-    result
+    Ok(Redirect::to(&redirect).into_response())
 }
