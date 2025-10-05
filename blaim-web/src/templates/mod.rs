@@ -5,6 +5,7 @@ use sqlx::types::time::OffsetDateTime;
 
 pub(crate) mod home;
 pub(crate) mod item_status;
+pub(crate) mod members;
 
 const APPEARANCE_IDIOMS: &[&str] = &[
     "Spontaneously coalesces from the quantum foam",
@@ -88,7 +89,11 @@ pub use crate::closure;
    <item-name> 
         <a href="/item/{{ item.item.name }}/{{ item.item.id }}">
             <i class="fa fa-archive" aria-hidden="true"></i>
-            {{ item.item.name }} 
+            {% if item.present %}
+                {{ item.item.name }}
+            {% else %}
+                <span class="not-within-box">{{ item.item.name }} </span>
+            {% endif %}
         </a> 
     </item-name>
 <ul>

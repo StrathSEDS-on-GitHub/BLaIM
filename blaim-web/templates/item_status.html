@@ -1,36 +1,4 @@
-{% macro show_owner(arg) %}
-{% match arg %}
-{% when Owner::Location(loc) %}
-<avatar-container>
-    <img src="/pkg/storage.svg"> <span>{{loc.name}}</span>
-</avatar-container>
-{% when Owner::Member(MemberOwner::Resolved(x)) %}
-{% let avatar_url %}
-{% if x.avatar.is_some() %}
-{% let avatar_url = format!("https://cdn.discordapp.com/avatars/{}/{}.png", x.id, x.avatar.as_ref().unwrap()) %}
-{% else %}
-{% let avatar_url = format!("https://cdn.discordapp.com/embed/avatars/{}.png", (x.id >> 22) % 6) %}
-{% endif %}
-
-{% let display_name = x.nick.as_ref().unwrap_or(&x.username) %}
-
-<avatar-container>
-    <img src="{{avatar_url}}"> <span {% if x.nick.is_some() %} title="{{x.username}}" {% endif
-        %}>{{display_name}}</span>
-</avatar-container>
-
-{% when Owner::Member(MemberOwner::Unresolved(id)) %}
-<avatar-container>
-    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}"
-        class="unresolved">Unresolved</span>
-</avatar-container>
-
-{% when Owner::Ethereal %}
-<avatar-container>
-    <img src="/pkg/blook.png" title="Maybe somebody you used to know?"> <span class="unresolved">No one?</span>
-</avatar-container>
-{% endmatch %}
-{% endmacro %}
+{% import "macros.html" as macros %}
 
 <!DOCTYPE html>
 <html lang="en">
@@ -51,7 +19,7 @@
                 owner.snowflake().map(closure!(id, { id==member.id })).unwrap_or(false) %} class="you" {% endif %} {%
                 when _ %} {% endmatch %}>
                 <p>Held by</p>
-                {% call show_owner(owner) %}
+                {% call macros::show_owner(owner) %}
             </item-owner>
 
             {% if let Some(updates) = borrow_updates %}
@@ -65,9 +33,9 @@
                         <h2>You got a <span>{{ updates.updated_items.item.item.name }}</span>!</h2>
 
                         <transfer-flex>
-                            {% call show_owner(prior_owner) %}
+                            {% call macros::show_owner(prior_owner) %}
                             <arrow>→</arrow>
-                            {% call show_owner(owner) %}
+                            {% call macros::show_owner(owner) %}
                         </transfer-flex>
                     </transfer>
 
@@ -133,9 +101,32 @@
                 <form>
                     {% if owner.snowflake().map(closure!(id, { id != member.id })).unwrap_or(true) %}
                     <button formaction="/borrow/{{ item.id }}" formmethod="post">Borrow as
-                        {% call show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
+                        {% call macros::show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
                     </button>
-
+                    {% else %}
+                    <button formaction="/give/{{ item.id }}" formmethod="post">
+                        Give to
+                        <autocomplete-container>
+                            <input type="hidden" name="to" value="" id="hidden-id" />
+                            <input type="text" name="search" placeholder="User..." id="user-input" required
+                                autocomplete="off" />
+                            <ul id="user-suggest">
+                            </ul>
+                            <avatar-container>
+                                <img src="" id="avatar-img">
+                            </avatar-container>
+                        </autocomplete-container>
+                        <script defer id="member" src="/members"></script>
+                        <script>
+                            document.getElementById("member").onload = () =>
+                                autocomplete(
+                                    document.getElementById("user-input"),
+                                    document.getElementById("user-suggest"),
+                                    document.getElementById("hidden-id"),
+                                    document.getElementById("avatar-img")
+                                );
+                        </script>
+                    </button>
                     {% endif %}
                 </form>
 
@@ -168,7 +159,7 @@
                         <borrow-line></borrow-line>
                     </borrow-timeline>
                     <borrow-owner>
-                        {% call show_owner(borrow) %}
+                        {% call macros::show_owner(borrow) %}
                     </borrow-owner>
                     {% endfor %}
 

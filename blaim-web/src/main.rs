@@ -45,6 +45,7 @@ async fn main() -> color_eyre::Result<()> {
         )
         .route("/borrow/{:item}", post(borrow_item))
         .route("/authorize", get(authorize))
+        .route("/members", get(routes::list_members))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .layer(TraceLayer::new_for_http())
         .layer(tower_sessions::SessionManagerLayer::new(storage).with_same_site(SameSite::Lax))

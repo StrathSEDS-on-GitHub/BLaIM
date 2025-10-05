@@ -1,13 +1,15 @@
 use askama::Template as _;
-use axum::{extract::{self, Path, Request}, response::{Html, IntoResponse}};
+use axum::{
+    extract::{self, Path, Request},
+    response::{Html, IntoResponse},
+};
 use blaim_db::{BorrowUpdates, Owner};
-use rand::{distr::Alphanumeric, Rng};
+use rand::{Rng, distr::Alphanumeric};
 use reqwest::StatusCode;
 use time::OffsetDateTime;
 use tower_sessions::Session;
 
-use crate::{session::BlaimSession, templates, AppState, BlaimError};
-
+use crate::{AppState, BlaimError, session::BlaimSession, templates};
 
 #[axum::debug_handler]
 pub async fn query_item_search(
@@ -23,7 +25,14 @@ pub async fn query_item_search(
     }
     let item = &items[0];
 
-    query_item(None, session, extract::State(state), Path((name, item.id)), req).await
+    query_item(
+        None,
+        session,
+        extract::State(state),
+        Path((name, item.id)),
+        req,
+    )
+    .await
 }
 
 pub async fn query_item(
@@ -88,7 +97,7 @@ pub async fn query_item(
         borrow_history,
         session: auth,
         borrow_updates,
-        box_contents
+        box_contents,
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))

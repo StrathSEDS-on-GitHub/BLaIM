@@ -130,9 +130,8 @@ async fn get_discord_info(snowflake: u64) -> color_eyre::Result<Member> {
         .send()
         .await?;
 
-    if !response.status().is_success() {}
     let body = response.bytes().await?;
-    let json: Value = serde_json::from_slice(&*body)?;
+    let json: Value = serde_json::from_slice(&body)?;
     let nick = json.get("nick").and_then(Value::as_str).map(str::to_string);
     let user = json.get("user").and_then(Value::as_object);
 
@@ -160,8 +159,8 @@ async fn get_discord_info(snowflake: u64) -> color_eyre::Result<Member> {
 }
 
 pub async fn get_owner_info(conn: &mut PgConnection, owner_str: &str) -> color_eyre::Result<Owner> {
-    if owner_str.starts_with("loc:") {
-        let location = lookup_storage(&mut *conn, &owner_str[4..])
+    if let Some(loc) = owner_str.strip_prefix("loc:") {
+        let location = lookup_storage(&mut *conn, loc)
             .await?
             .into_iter()
             .next()
@@ -286,7 +285,10 @@ pub async fn borrow_item(
         .into_iter_depth_first()
         .filter(|(_, node, _)| node.present)
         .collect();
-    Ok(BorrowUpdates { updated_items , present_updates  })
+    Ok(BorrowUpdates {
+        updated_items,
+        present_updates,
+    })
 }
 
 pub async fn borrow_history(
@@ -507,13 +509,14 @@ pub async fn unbox_all(
     items: &[Item],
 ) -> Result<(), UnboxingError> {
     for item in items {
-        if let None = sqlx::query!(
+        if sqlx::query!(
             "DELETE FROM meta WHERE child = $1 AND parent = $2 RETURNING child;",
             item.id,
             r#box.id,
         )
         .fetch_optional(&mut *connection)
         .await?
+        .is_none()
         {
             return Err(UnboxingError::NotFound {
                 item: item.clone(),
@@ -616,9 +619,9 @@ impl Display for ItemTree {
                     "├─"
                 };
                 let present_icon = if it.present { "🟢" } else { "🔴" };
-                write!(
+                writeln!(
                     f,
-                    "{: <prefix_size$}{tree_icon} {present_icon} {}\n",
+                    "{: <prefix_size$}{tree_icon} {present_icon} {}",
                     "", it.item.name
                 )
             })
@@ -799,6 +802,27 @@ pub struct Member {
     pub avatar: Option<String>,
 }
 
+/// JS has a single numeric type and it is fuckING 64-bit floating point.
+/// So `u64` snowflake gets converted to string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JsSafeMember {
+    pub id: String,
+    pub nick: Option<String>,
+    pub username: String,
+    pub avatar: Option<String>,
+}
+
+impl Member {
+    pub fn to_js_safe(&self) -> JsSafeMember {
+        JsSafeMember {
+            id: self.id.to_string(),
+            nick: self.nick.clone(),
+            username: self.username.clone(),
+            avatar: self.avatar.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MemberOwner {
     Resolved(Member),
@@ -837,15 +861,43 @@ pub async fn try_resolve_member(
         })
     {
         Ok(owner)
+    } else if let Ok(member) = get_discord_info(snowflake).await {
+        // Cache this info
+        cache_member_info(&mut *conn, &member).await?;
+        Ok(MemberOwner::Resolved(member))
     } else {
-        if let Ok(member) = get_discord_info(snowflake).await {
-            // Cache this info
-            cache_member_info(&mut *conn, &member).await?;
-            Ok(MemberOwner::Resolved(member))
-        } else {
-            Ok(MemberOwner::Unresolved(snowflake))
-        }
+        Ok(MemberOwner::Unresolved(snowflake))
     }
+}
+
+pub async fn get_all_cached_members(conn: &mut PgConnection) -> color_eyre::Result<Vec<Member>> {
+    struct ShittyI64Member {
+        id: i64,
+        nick: Option<String>,
+        username: String,
+        avatar: Option<String>,
+    }
+
+    let i64_member = sqlx::query_as!(ShittyI64Member, "SELECT * FROM members")
+        .fetch_all(conn)
+        .await?;
+
+    Ok(i64_member
+        .into_iter()
+        .map(
+            |ShittyI64Member {
+                 id,
+                 nick,
+                 username,
+                 avatar,
+             }| Member {
+                id: id as u64,
+                nick,
+                username,
+                avatar,
+            },
+        )
+        .collect())
 }
 
 pub async fn find_cached_member_info(
