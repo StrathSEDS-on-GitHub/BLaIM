@@ -1,3 +1,5 @@
+use askama::Template;
+use blaim_db::{ItemTree, ItemTreeNode};
 use rand::seq::IndexedRandom;
 use sqlx::types::time::OffsetDateTime;
 
@@ -69,3 +71,53 @@ pub const OAUTH_REDIRECT_URI: &str = {
         "http://localhost:8080/authorize"
     }
 };
+
+#[macro_export]
+macro_rules! closure {
+    ($args:pat, $body:expr) => {
+        |$args| $body
+    };
+}
+
+pub use crate::closure;
+
+#[derive(Template)]
+#[template(
+    source = r#"
+{% if children.len() > 0 %}
+   <item-name> 
+        <a href="/item/{{ item.item.name }}/{{ item.item.id }}">
+            <i class="fa fa-archive" aria-hidden="true"></i>
+            {{ item.item.name }} 
+        </a> 
+    </item-name>
+<ul>
+    {% for item in children %}
+            <li> {{ item.render()? }} </li>
+    {% endfor %}
+</ul>
+{% else %}
+   <item-name> 
+        <a href="/item/{{ item.item.name }}/{{ item.item.id }}">
+            <i class="fa fa-circle-o" aria-hidden="true"></i>
+            {{ item.item.name }} 
+        </a> 
+    </item-name>
+{% endif %}
+"#,
+    ext = "html",
+    escape = ""
+)]
+pub struct ItemTreeTemplate {
+    pub item: ItemTreeNode,
+    pub children: Vec<ItemTreeTemplate>,
+}
+
+impl From<&ItemTree> for ItemTreeTemplate {
+    fn from(value: &ItemTree) -> Self {
+        ItemTreeTemplate {
+            item: value.item.clone(),
+            children: value.children.iter().map(Into::into).collect(),
+        }
+    }
+}

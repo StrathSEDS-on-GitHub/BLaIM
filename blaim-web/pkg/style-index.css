@@ -10,19 +10,20 @@ html,
 body {
     margin: 0;
     padding: 0;
-    height: 100%;
+    min-height: 100vh;
     width: 100%;
     font-family: 'Source Sans Pro', 'Atkinson Hyperlegible', system-ui, sans-serif;
     color: #eee;
+    background-color: #09131a;
 }
 
 body {
     background-image: var(--radial-gradient-right);
+    padding: 50px 0 50px 0;
 }
 
 main {
     margin: auto;
-    margin-top: 50px;
     max-width: 600px;
     backdrop-filter: blur(100px);
     border-radius: 20px;

@@ -1,6 +1,6 @@
 use askama::Template as _;
 use axum::{extract::{self, Path, Request}, response::{Html, IntoResponse}};
-use blaim_db::Owner;
+use blaim_db::{BorrowUpdates, Owner};
 use rand::{distr::Alphanumeric, Rng};
 use reqwest::StatusCode;
 use time::OffsetDateTime;
@@ -23,11 +23,11 @@ pub async fn query_item_search(
     }
     let item = &items[0];
 
-    query_item(session, extract::State(state), Path((name, item.id)), req).await
+    query_item(None, session, extract::State(state), Path((name, item.id)), req).await
 }
 
-#[axum::debug_handler]
 pub async fn query_item(
+    borrow_updates: Option<BorrowUpdates>,
     session: Session,
     extract::State(state): extract::State<AppState>,
     Path((_name, id)): Path<(String, i32)>,
@@ -86,6 +86,7 @@ pub async fn query_item(
         owner,
         borrow_history,
         session: auth,
+        borrow_updates
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))

@@ -188,11 +188,17 @@ pub async fn get_last_holder(
     Ok(holder.map(|row| row.to_user))
 }
 
+#[derive(Debug, Clone)]
+pub struct BorrowUpdates {
+    pub updated_items: ItemTree,
+    pub present_updates: Vec<(Item, Item, bool)>,
+}
+
 pub async fn borrow_item(
     connection: &mut PgConnection,
     item: &Item,
     user: &str,
-) -> color_eyre::Result<(ItemTree, Vec<(Item, Item, bool)>)> {
+) -> color_eyre::Result<BorrowUpdates> {
     let now = PrimitiveDateTime::new(
         OffsetDateTime::now_utc().date(),
         OffsetDateTime::now_utc().time(),
@@ -276,11 +282,11 @@ pub async fn borrow_item(
         }
     }
 
-    let update_tree: ItemTree = items
+    let updated_items: ItemTree = items
         .into_iter_depth_first()
         .filter(|(_, node, _)| node.present)
         .collect();
-    Ok((update_tree, present_updates))
+    Ok(BorrowUpdates { updated_items , present_updates  })
 }
 
 pub async fn borrow_history(
@@ -804,6 +810,16 @@ pub enum Owner {
     Location(Location),
     Member(MemberOwner),
     Ethereal,
+}
+
+impl Owner {
+    pub fn snowflake(&self) -> Option<u64> {
+        match self {
+            Owner::Member(MemberOwner::Resolved(member)) => Some(member.id),
+            Owner::Member(MemberOwner::Unresolved(snowflake)) => Some(*snowflake),
+            _ => None,
+        }
+    }
 }
 
 pub async fn try_resolve_member(

@@ -4,14 +4,15 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, post},
 };
+use blaim_db::BorrowUpdates;
 use color_eyre::eyre::Context;
 use sqlx::PgPool;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tower_sessions::cookie::SameSite;
 
-use crate::routes::{authorize, query_item, query_item_search};
+use crate::routes::{authorize, borrow_item, query_item, query_item_search};
 
 mod routes;
 mod session;
@@ -39,7 +40,11 @@ async fn main() -> color_eyre::Result<()> {
     let app = Router::new()
         .route("/", get(home))
         .route("/item/{:name}", get(query_item_search))
-        .route("/item/{:name}/{:id}", get(query_item))
+        .route(
+            "/item/{:name}/{:id}",
+            get(|session, state, path, req| query_item(None, session, state, path, req)),
+        )
+        .route("/borrow/{:item}", post(borrow_item))
         .route("/authorize", get(authorize))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .layer(TraceLayer::new_for_http())

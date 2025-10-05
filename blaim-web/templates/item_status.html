@@ -1,5 +1,4 @@
 {% macro show_owner(arg) %}
-
 {% match arg %}
 {% when Owner::Location(loc) %}
 <avatar-container>
@@ -19,16 +18,20 @@
     <img src="{{avatar_url}}"> <span {% if x.nick.is_some() %} title="{{x.username}}" {% endif
         %}>{{display_name}}</span>
 </avatar-container>
+
 {% when Owner::Member(MemberOwner::Unresolved(id)) %}
 <avatar-container>
     <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}"
         class="unresolved">Unresolved</span>
 </avatar-container>
-{% when Owner::Ethereal %}
-<span>👻 No one?</span>
-{% endmatch %}
 
+{% when Owner::Ethereal %}
+<avatar-container>
+    <img src="/pkg/blook.png" title="Maybe somebody you used to know?"> <span class="unresolved">No one?</span>
+</avatar-container>
+{% endmatch %}
 {% endmacro %}
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -37,16 +40,87 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Item Status</title>
     <link rel="stylesheet" href="/pkg/style.css" />
+    <link rel="stylesheet" href="/pkg/css/font-awesome.min.css" />
 </head>
 
 <body>
     <main>
-        <item-card>
+        <item-card class="frosty">
             <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
-            <item-owner>
+            <item-owner {% match session %} {% when BlaimSession::Authenticated { member } %} {% if
+                owner.snowflake().map(closure!(id, { id==member.id })).unwrap_or(false) %} class="you" {% endif %} {%
+                when _ %} {% endmatch %}>
                 <p>Held by</p>
                 {% call show_owner(owner) %}
             </item-owner>
+
+            {% if let Some(updates) = borrow_updates %}
+
+            {% let prior_owner = borrow_history.iter().skip(1).next().map(closure!(it,
+            &it.0)).unwrap_or(&Owner::Ethereal) %}
+            <borrow-update-section>
+                <img src="/pkg/star.svg" />
+                <borrow-update>
+                    <transfer class="frosty">
+                        <h2>You got a <span>{{ updates.updated_items.item.item.name }}</span>!</h2>
+
+                        <transfer-flex>
+                            {% call show_owner(prior_owner) %}
+                            <arrow>→</arrow>
+                            {% call show_owner(owner) %}
+                        </transfer-flex>
+                    </transfer>
+
+                    {% if !updates.updated_items.children.is_empty() %}
+                    <additional-items class="frosty">
+                        <details>
+                            <summary>
+                                <h5>
+                                    <i class="fa fa-archive"></i>
+                                    Together with <b>{{ updates.updated_items.iter_depth_first().count() - 1 }}
+                                        boxed items</b>
+                                </h5>
+                            </summary>
+                        </details>
+                        <item-tree>
+                            {{ ItemTreeTemplate::from(updates.updated_items) | safe }}
+                        </item-tree>
+                    </additional-items>
+                    {% endif %}
+
+                    {% if !updates.present_updates.is_empty() %}
+                    <present-updates-section class="frosty">
+                        <details>
+                            <summary>
+                                <h5>
+                                    <i class="fa fa-refresh"></i>
+                                    Updating status of <b>{{ updates.present_updates.len() }} items</b>
+                                </h5>
+                            </summary>
+                        </details>
+                        <present-updates>
+                            {% for (bx, item, present) in updates.present_updates %}
+                            <item-name>{{ item.name }}</item-name>
+                            {% if present %}
+                            <box-icon>
+                                <i class="fa fa-sign-in in-box"></i>
+                            </box-icon>
+                            <box-name class="in-box">{{ bx.name }}</box-name>
+                            {% else %}
+                            <box-icon>
+                                <i class="fa fa-sign-out out-box"></i>
+                            </box-icon>
+                            <box-name class="out-box">{{ bx.name }}</box-name>
+                            {% endif %}
+                            {% endfor %}
+                        </present-updates>
+                    </present-updates-section>
+                    {% endif %}
+                </borrow-update>
+
+
+            </borrow-update-section>
+            {% endif %}
 
             <actions>
                 {% match session %}
@@ -57,13 +131,17 @@
                 </a>
                 {% when BlaimSession::Authenticated { member } %}
                 <form>
-                    <button formaction="/borrow/{{ item.id }}/{{ member.id }}" formmethod="post">Borrow as
+                    {% if owner.snowflake().map(closure!(id, { id != member.id })).unwrap_or(true) %}
+                    <button formaction="/borrow/{{ item.id }}" formmethod="post">Borrow as
                         {% call show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
                     </button>
+
+                    {% endif %}
                 </form>
 
                 {% endmatch %}
             </actions>
+
 
             <borrow-history-container>
                 <h2>Borrow history</h2>
