@@ -82,6 +82,71 @@ avatar-container {
     z-index: -1;
 }
 
+.frosty-solid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    padding: 3px;
+    background-image: radial-gradient(ellipse at right, #345a77 0%, #192a3a 80%);
+    /* control the border thickness */
+    mask:
+        conic-gradient(#000 0 0) content-box,
+        conic-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: -1;
+}
+
+
+item-tree {
+    item-name {
+        font-size: 10pt;
+
+        a {
+            i {
+                margin: 2px;
+                color: rgb(117, 129, 173);
+            }
+
+            color: #a4c9c9;
+            text-decoration: none;
+        }
+
+        .not-within-box {
+            font-style: italic;
+            color: #798686;
+        }
+    }
+
+    ul {
+        width: fit-content;
+        margin: 0;
+        margin-top: 5px;
+        padding-top: 5px;
+        list-style: none;
+        transition: max-height 0.5s;
+        overflow: hidden;
+
+        li {
+            position: relative;
+            padding: 3px;
+        }
+
+        li::before {
+            content: '';
+            display: block;
+            position: absolute;
+            top: -1.5em;
+            left: -20px;
+            width: 10px;
+            height: 2.5em;
+            border-left: 2px solid #8fc5c5;
+            border-bottom: 2px solid #8fc5c5;
+        }
+    }
+}
+
 item-card {
     display: grid;
     grid-template-columns: 7fr 4fr;
@@ -275,48 +340,6 @@ item-card {
                     max-height: 0;
                     overflow: hidden;
                     transition: max-height 0.5s;
-
-                    item-name {
-                        font-size: 10pt;
-
-                        a {
-                            i {
-                                margin: 2px;
-                                color: rgb(91 102 140);
-                            }
-
-                            color: #89acac;
-                            text-decoration: none;
-                        }
-                    }
-
-                    ul {
-                        width: fit-content;
-                        margin: 0;
-                        margin-top: 5px;
-                        padding-top: 5px;
-                        list-style: none;
-                        transition: max-height 0.5s;
-                        overflow: hidden;
-
-                        li {
-                            position: relative;
-                            padding: 3px;
-                            font-size: 10pt;
-                        }
-
-                        li::before {
-                            content: '';
-                            display: block;
-                            position: absolute;
-                            top: -14px;
-                            left: -15px;
-                            width: 10px;
-                            height: 24px;
-                            border-left: 2px solid #8fc5c5;
-                            border-bottom: 2px solid #8fc5c5;
-                        }
-                    }
                 }
 
                 details[open]+item-tree {
@@ -386,13 +409,43 @@ item-card {
         }
     }
 
+    box-contents {
+        grid-column: 1 / span 2;
+
+        h2 {
+            margin-left: min(80px, 10vw);
+            font-size: 1.7em;
+        }
+
+        item-tree-container {
+            width: 100%;
+            display: block;
+            margin-bottom: 20px;
+
+            item-tree {
+                margin: auto;
+                display: block;
+                width: fit-content;
+                border-radius: 20px;
+                padding:  20px 60px 20px 60px;
+                background-color: #09131a22;
+                backdrop-filter: blur(15px);
+
+                item-name {
+                    font-size: 1.4em;
+                }
+            }
+        }
+
+    }
 
     borrow-history-container {
         grid-column: 1 / span 2;
-        margin: auto;
 
         h2 {
             margin: 0;
+            margin-left: min(80px, 10vw);
+            font-size: 1.7em;
         }
 
         borrow-history {

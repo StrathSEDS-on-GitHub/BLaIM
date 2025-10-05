@@ -1,5 +1,5 @@
 use askama::Template;
-use blaim_db::{BorrowUpdates, Item, MemberOwner, Owner};
+use blaim_db::{BorrowUpdates, Item, ItemTree, MemberOwner, Owner};
 use sqlx::types::time::OffsetDateTime;
 
 use crate::session::BlaimSession;
@@ -12,6 +12,7 @@ pub struct ItemStatusTemplate {
     pub session: BlaimSession,
 
     pub item: Item,
+    pub box_contents: ItemTree,
     pub owner: Owner,
     pub borrow_history: Vec<(Owner, OffsetDateTime)>,
     pub borrow_updates: Option<BorrowUpdates>,

@@ -6,7 +6,6 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{get, post},
 };
-use blaim_db::BorrowUpdates;
 use color_eyre::eyre::Context;
 use sqlx::PgPool;
 use tower_http::{services::ServeDir, trace::TraceLayer};

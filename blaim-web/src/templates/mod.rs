@@ -99,8 +99,13 @@ pub use crate::closure;
 {% else %}
    <item-name> 
         <a href="/item/{{ item.item.name }}/{{ item.item.id }}">
-            <i class="fa fa-circle-o" aria-hidden="true"></i>
-            {{ item.item.name }} 
+            {% if item.present %}
+                <i class="fa fa-check-circle" title="Within box" aria-hidden="true"></i>
+                {{ item.item.name }} 
+            {% else %}
+                <i class="fa fa-circle-o" title="Not within box" aria-hidden="true"></i>
+                <span class="not-within-box">{{ item.item.name }} </span>
+            {% endif %}
         </a> 
     </item-name>
 {% endif %}

@@ -142,6 +142,19 @@
                 {% endmatch %}
             </actions>
 
+            {% if box_contents.iter_depth_first().count() > 1 %}
+            <box-contents>
+                <h2>Contents</h2>
+                <item-tree-container>
+                    <item-tree class="frosty-solid">
+                        {{ ItemTreeTemplate::from(box_contents) | safe }}
+                    </item-tree>
+                </item-tree-container>
+
+            </box-contents>
+            {% else %}
+            {% endif %}
+
 
             <borrow-history-container>
                 <h2>Borrow history</h2>

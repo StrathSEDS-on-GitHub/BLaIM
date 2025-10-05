@@ -80,13 +80,15 @@ pub async fn query_item(
         });
 
     let borrow_history = futures::future::try_join_all(borrow_history).await?;
+    let box_contents = blaim_db::box_contents(&mut *state.pool.acquire().await?, &item).await?;
 
     let template = templates::item_status::ItemStatusTemplate {
         item,
         owner,
         borrow_history,
         session: auth,
-        borrow_updates
+        borrow_updates,
+        box_contents
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))
