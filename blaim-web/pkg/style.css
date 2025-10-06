@@ -221,6 +221,8 @@ item-card {
             gap: 10px;
             position: relative;
             text-wrap: nowrap;
+            min-width: 250px;
+            justify-content: center;
 
             &:hover {
                 outline: 1px solid #92d8c6;
@@ -532,6 +534,12 @@ item-card {
             margin: auto;
             grid-column: 1/1;
         }
+    }
+
+    actions {
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
     }
 }
 

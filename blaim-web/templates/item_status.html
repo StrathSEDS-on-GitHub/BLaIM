@@ -116,13 +116,21 @@
                     Sign in with Discord
                 </a>
                 {% when BlaimSession::Authenticated { member } %}
+                {% if owner.as_ref().and_then(closure!(it, it.snowflake())).map(closure!(id, id !=
+                member.id)).unwrap_or(true) %}
                 <form>
-                    {% if owner.as_ref().and_then(closure!(it, it.snowflake())).map(closure!(id, id !=
-                    member.id)).unwrap_or(true) %}
                     <button formaction="/borrow/{{ item.id }}" formmethod="post">Borrow as
                         {% call macros::show_owner(Some(Owner::Member(MemberOwner::Resolved(member.clone())))) %}
                     </button>
-                    {% else %}
+                </form>
+                {% else %}
+                <form>
+                    <button formaction="/give/{{ item.id }}" formmethod="post">
+                        Move to storage
+                        <input type="hidden" name="to" value="loc:jw9" />
+                    </button>
+                </form>
+                <form>
                     <button formaction="/give/{{ item.id }}" formmethod="post">
                         Give to
                         <autocomplete-container>
@@ -151,9 +159,8 @@
                                 );
                         </script>
                     </button>
-                    {% endif %}
                 </form>
-
+                {% endif %}
                 {% endmatch %}
             </actions>
 
