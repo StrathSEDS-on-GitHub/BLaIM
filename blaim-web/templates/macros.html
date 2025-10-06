@@ -1,11 +1,11 @@
 
 {% macro show_owner(arg) %}
 {% match arg %}
-{% when Owner::Location(loc) %}
+{% when Some(Owner::Location(loc)) %}
 <avatar-container>
     <img src="/pkg/storage.svg"> <span>{{loc.name}}</span>
 </avatar-container>
-{% when Owner::Member(MemberOwner::Resolved(x)) %}
+{% when Some(Owner::Member(MemberOwner::Resolved(x))) %}
 {% let avatar_url %}
 {% if x.avatar.is_some() %}
 {% let avatar_url = format!("https://cdn.discordapp.com/avatars/{}/{}.png", x.id, x.avatar.as_ref().unwrap()) %}
@@ -20,15 +20,16 @@
         %}>{{display_name}}</span>
 </avatar-container>
 
-{% when Owner::Member(MemberOwner::Unresolved(id)) %}
+{% when Some(Owner::Member(MemberOwner::Unresolved(id))) %}
 <avatar-container>
     <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}"
         class="unresolved">Unresolved</span>
 </avatar-container>
 
-{% when Owner::Ethereal %}
+{% when None %}
 <avatar-container>
     <img src="/pkg/blook.png" title="Maybe somebody you used to know?"> <span class="unresolved">No one?</span>
 </avatar-container>
+#}
 {% endmatch %}
 {% endmacro %}

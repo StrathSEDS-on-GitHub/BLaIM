@@ -833,7 +833,33 @@ pub enum MemberOwner {
 pub enum Owner {
     Location(Location),
     Member(MemberOwner),
-    Ethereal,
+}
+
+impl<'de> Deserialize<'de> for Owner {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        s.as_str().try_into().map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<&str> for Owner {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if let Some(loc) = value.strip_prefix("loc:") {
+            Ok(Owner::Location(Location {
+                id: 0,
+                name: loc.to_string(),
+                strid: loc.to_string(),
+            }))
+        } else if let Ok(snowflake) = value.parse::<u64>() {
+            Ok(Owner::Member(MemberOwner::Unresolved(snowflake)))
+        } else {
+            Err("Invalid owner string")
+        } 
+    }
 }
 
 impl Owner {
@@ -842,6 +868,14 @@ impl Owner {
             Owner::Member(MemberOwner::Resolved(member)) => Some(member.id),
             Owner::Member(MemberOwner::Unresolved(snowflake)) => Some(*snowflake),
             _ => None,
+        }
+    }
+
+    pub fn db_string(&self) -> String {
+        match self {
+            Owner::Location(loc) => format!("loc:{}", loc.strid),
+            Owner::Member(MemberOwner::Resolved(member)) => member.id.to_string(),
+            Owner::Member(MemberOwner::Unresolved(snowflake)) => snowflake.to_string(),
         }
     }
 }

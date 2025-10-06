@@ -15,9 +15,18 @@
     <main>
         <item-card class="frosty">
             <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
-            <item-owner {% match session %} {% when BlaimSession::Authenticated { member } %} {% if
-                owner.snowflake().map(closure!(id, { id==member.id })).unwrap_or(false) %} class="you" {% endif %} {%
-                when _ %} {% endmatch %}>
+            <item-owner 
+                {% match session %} 
+                {% when BlaimSession::Authenticated { member } %} 
+                {% if
+                    owner.as_ref()
+                        .and_then(closure!(it, { it.snowflake() }))
+                        .map(closure!(id, id == member.id)).
+                        unwrap_or(false) 
+                        %} class="you" 
+                {% endif %} 
+                {% when _ %} 
+                {% endmatch %}>
                 <p>Held by</p>
                 {% call macros::show_owner(owner) %}
             </item-owner>
@@ -25,12 +34,29 @@
             {% if let Some(updates) = borrow_updates %}
 
             {% let prior_owner = borrow_history.iter().skip(1).next().map(closure!(it,
-            &it.0)).unwrap_or(&Owner::Ethereal) %}
+            &it.0)) %}
             <borrow-update-section>
                 <img src="/pkg/star.svg" />
                 <borrow-update>
                     <transfer class="frosty">
-                        <h2>You got a <span>{{ updates.updated_items.item.item.name }}</span>!</h2>
+                        <h2>
+                            {% match session %} 
+                            {% when BlaimSession::Authenticated { member } %} 
+                            {% if
+                                owner.as_ref()
+                                    .and_then(closure!(it, { it.snowflake() }))
+                                    .map(closure!(id, id == member.id)).
+                                    unwrap_or(false) 
+                            %} 
+                                You got a 
+                            {% else %}
+                                Transferred
+                            {% endif %} 
+                            {% when _ %} 
+                                Transferred
+                            {% endmatch %}
+                            
+                            <span>{{ updates.updated_items.item.item.name }}</span>!</h2>
 
                         <transfer-flex>
                             {% call macros::show_owner(prior_owner) %}
@@ -89,7 +115,6 @@
 
             </borrow-update-section>
             {% endif %}
-
             <actions>
                 {% match session %}
                 {% when BlaimSession::Challenged { state, at, redirect } %}
@@ -99,9 +124,9 @@
                 </a>
                 {% when BlaimSession::Authenticated { member } %}
                 <form>
-                    {% if owner.snowflake().map(closure!(id, { id != member.id })).unwrap_or(true) %}
+                    {% if owner.as_ref().and_then(closure!(it, it.snowflake())).map(closure!(id, id != member.id)).unwrap_or(true) %}
                     <button formaction="/borrow/{{ item.id }}" formmethod="post">Borrow as
-                        {% call macros::show_owner(Owner::Member(MemberOwner::Resolved(member.clone()))) %}
+                        {% call macros::show_owner(Some(Owner::Member(MemberOwner::Resolved(member.clone())))) %}
                     </button>
                     {% else %}
                     <button formaction="/give/{{ item.id }}" formmethod="post">
@@ -159,7 +184,7 @@
                         <borrow-line></borrow-line>
                     </borrow-timeline>
                     <borrow-owner>
-                        {% call macros::show_owner(borrow) %}
+                        {% call macros::show_owner(Some(borrow)) %}
                     </borrow-owner>
                     {% endfor %}
 

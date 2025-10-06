@@ -1,9 +1,8 @@
-use askama::Template as _;
+use askama::{filters, Template as _};
 use axum::{
-    extract::{self, Path, Request},
-    response::{Html, IntoResponse},
+    extract::{self, Path}, http::Uri, response::{Html, IntoResponse}
 };
-use blaim_db::{BorrowUpdates, Owner};
+use blaim_db::BorrowUpdates;
 use rand::{Rng, distr::Alphanumeric};
 use reqwest::StatusCode;
 use time::OffsetDateTime;
@@ -16,7 +15,6 @@ pub async fn query_item_search(
     session: Session,
     extract::State(state): extract::State<AppState>,
     Path(name): Path<String>,
-    req: Request,
 ) -> Result<impl IntoResponse, BlaimError> {
     let items = blaim_db::lookup_item(&mut *state.pool.acquire().await?, &name).await?;
 
@@ -30,7 +28,7 @@ pub async fn query_item_search(
         session,
         extract::State(state),
         Path((name, item.id)),
-        req,
+        format!("/item/{}/{}", filters::urlencode_strict(item.name.clone()).unwrap(), item.id).parse().unwrap()
     )
     .await
 }
@@ -40,7 +38,7 @@ pub async fn query_item(
     session: Session,
     extract::State(state): extract::State<AppState>,
     Path((_name, id)): Path<(String, i32)>,
-    req: Request,
+    uri: Uri
 ) -> Result<(StatusCode, Html<String>), BlaimError> {
     let auth: Option<BlaimSession> = session.get("session").await.ok().flatten();
 
@@ -60,7 +58,7 @@ pub async fn query_item(
             let auth = BlaimSession::Challenged {
                 at: OffsetDateTime::now_utc(),
                 state: oauth_state,
-                redirect: req.uri().to_string(),
+                redirect: uri.to_string()
             };
             session.insert("session", &auth).await?;
             auth
@@ -73,9 +71,9 @@ pub async fn query_item(
 
     let owner = blaim_db::get_last_holder(&mut *state.pool.acquire().await?, id).await?;
     let owner = if let Some(owner) = owner {
-        blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?
+        Some(blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?)
     } else {
-        Owner::Ethereal
+        None
     };
 
     let borrow_history = blaim_db::borrow_history(&mut *state.pool.acquire().await?, item.id)

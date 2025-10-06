@@ -13,7 +13,7 @@ pub struct ItemStatusTemplate {
 
     pub item: Item,
     pub box_contents: ItemTree,
-    pub owner: Owner,
+    pub owner: Option<Owner>,
     pub borrow_history: Vec<(Owner, OffsetDateTime)>,
     pub borrow_updates: Option<BorrowUpdates>,
 }

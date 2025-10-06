@@ -394,6 +394,7 @@ item-card {
 
                 details {
                     cursor: pointer;
+                    margin: 4px 0 4px 0;
 
                     h5 {
                         margin: 4px 0 4px 0;

@@ -6,7 +6,7 @@ const members = [
         {   
             data: {{ member_json | safe }},
             rendered:
-            `<li onclick='assignInput(event, {{member_json | safe}})'>{% call macros::show_owner(Owner::Member(MemberOwner::Resolved(m.clone())) )  %}</li>`
+            `<li onclick='assignInput(event, {{member_json | safe}})'>{% call macros::show_owner(Some(Owner::Member(MemberOwner::Resolved(m.clone()))))  %}</li>`
         },
     {% endfor %}
 ];
