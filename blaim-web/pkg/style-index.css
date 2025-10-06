@@ -22,14 +22,26 @@ body {
     padding: 50px 0 50px 0;
 }
 
+main::after {
+    backdrop-filter: blur(100px);
+    border-radius: 20px;
+    background-color: #1a344901;
+    z-index: -2;
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
 main {
     margin: auto;
     max-width: 600px;
-    backdrop-filter: blur(100px);
-    border-radius: 20px;
     padding: 50px;
-    background-color: #1a344901;
     text-align: center;
+    position: relative;
+    z-index: 2;
 
     h1 {
         margin-top: 0;
@@ -48,6 +60,11 @@ logo {
     width: fit-content;
 }
 
+autocomplete-container {
+    width: 100%;
+    display: flex;
+}
+
 searches {
     text-align: left;
 
@@ -59,9 +76,9 @@ searches {
     form {
         display: flex;
         flex-direction: row;
+
         input {
-            background-color: #00000031;
-            backdrop-filter: blur(90px);
+            background-color: #101e29;
             border: 1px solid #101e29;
             border-radius: 10px;
             padding: 8px;
@@ -84,4 +101,20 @@ searches {
             cursor: pointer;
         }
     }
+}
+
+.frosty::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    padding: 3px;
+    /* control the border thickness */
+    backdrop-filter: blur(5px) brightness(1.8) contrast(1.2) saturate(0.7);
+    mask:
+        conic-gradient(#000 0 0) content-box,
+        conic-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: -1;
 }

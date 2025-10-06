@@ -3,10 +3,6 @@ use blaim_db::{ItemTree, ItemTreeNode};
 use rand::seq::IndexedRandom;
 use sqlx::types::time::OffsetDateTime;
 
-pub(crate) mod home;
-pub(crate) mod item_status;
-pub(crate) mod members;
-
 const APPEARANCE_IDIOMS: &[&str] = &[
     "Spontaneously coalesces from the quantum foam",
     "Materializes via supply-chain tunneling",
@@ -79,8 +75,6 @@ macro_rules! closure {
         |$args| $body
     };
 }
-
-pub use crate::closure;
 
 #[derive(Template)]
 #[template(

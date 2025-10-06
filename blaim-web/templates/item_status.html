@@ -8,6 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Item Status</title>
     <link rel="stylesheet" href="/pkg/style.css" />
+    <link rel="stylesheet" href="/pkg/css/autocomplete.css" />
     <link rel="stylesheet" href="/pkg/css/font-awesome.min.css" />
 </head>
 
@@ -15,18 +16,9 @@
     <main>
         <item-card class="frosty">
             <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
-            <item-owner 
-                {% match session %} 
-                {% when BlaimSession::Authenticated { member } %} 
-                {% if
-                    owner.as_ref()
-                        .and_then(closure!(it, { it.snowflake() }))
-                        .map(closure!(id, id == member.id)).
-                        unwrap_or(false) 
-                        %} class="you" 
-                {% endif %} 
-                {% when _ %} 
-                {% endmatch %}>
+            <item-owner {% match session %} {% when BlaimSession::Authenticated { member } %} {% if owner.as_ref()
+                .and_then(closure!(it, { it.snowflake() })) .map(closure!(id, id==member.id)). unwrap_or(false) %}
+                class="you" {% endif %} {% when _ %} {% endmatch %}>
                 <p>Held by</p>
                 {% call macros::show_owner(owner) %}
             </item-owner>
@@ -40,23 +32,24 @@
                 <borrow-update>
                     <transfer class="frosty">
                         <h2>
-                            {% match session %} 
-                            {% when BlaimSession::Authenticated { member } %} 
+                            {% match session %}
+                            {% when BlaimSession::Authenticated { member } %}
                             {% if
-                                owner.as_ref()
-                                    .and_then(closure!(it, { it.snowflake() }))
-                                    .map(closure!(id, id == member.id)).
-                                    unwrap_or(false) 
-                            %} 
-                                You got a 
+                            owner.as_ref()
+                            .and_then(closure!(it, { it.snowflake() }))
+                            .map(closure!(id, id == member.id)).
+                            unwrap_or(false)
+                            %}
+                            You got a
                             {% else %}
-                                Transferred
-                            {% endif %} 
-                            {% when _ %} 
-                                Transferred
+                            Transferred
+                            {% endif %}
+                            {% when _ %}
+                            Transferred
                             {% endmatch %}
-                            
-                            <span>{{ updates.updated_items.item.item.name }}</span>!</h2>
+
+                            <span>{{ updates.updated_items.item.item.name }}</span>!
+                        </h2>
 
                         <transfer-flex>
                             {% call macros::show_owner(prior_owner) %}
@@ -124,7 +117,8 @@
                 </a>
                 {% when BlaimSession::Authenticated { member } %}
                 <form>
-                    {% if owner.as_ref().and_then(closure!(it, it.snowflake())).map(closure!(id, id != member.id)).unwrap_or(true) %}
+                    {% if owner.as_ref().and_then(closure!(it, it.snowflake())).map(closure!(id, id !=
+                    member.id)).unwrap_or(true) %}
                     <button formaction="/borrow/{{ item.id }}" formmethod="post">Borrow as
                         {% call macros::show_owner(Some(Owner::Member(MemberOwner::Resolved(member.clone())))) %}
                     </button>
@@ -141,14 +135,19 @@
                                 <img src="" id="avatar-img">
                             </avatar-container>
                         </autocomplete-container>
-                        <script defer id="member" src="/members"></script>
+                        <script defer src="/api/members"></script>
+                        <script defer id="member" src="/pkg/js/autocomplete.js"></script>
                         <script>
                             document.getElementById("member").onload = () =>
                                 autocomplete(
                                     document.getElementById("user-input"),
                                     document.getElementById("user-suggest"),
                                     document.getElementById("hidden-id"),
-                                    document.getElementById("avatar-img")
+                                    document.getElementById("avatar-img"),
+                                    MEMBERS,
+                                    (member, value) =>
+                                        member.data.nick?.toLowerCase()?.includes(value) ||
+                                        member.data.username.toLowerCase()?.includes(value)
                                 );
                         </script>
                     </button>

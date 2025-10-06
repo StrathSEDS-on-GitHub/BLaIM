@@ -1,14 +1,22 @@
-use askama::{filters, Template as _};
+use askama::{Template, filters};
+use blaim_db::{BorrowUpdates, Item, ItemTree, MemberOwner, Owner};
+use sqlx::types::time::OffsetDateTime;
+
+use crate::session::BlaimSession;
+use time::format_description::well_known::Rfc2822;
+
+use crate::closure;
+use crate::templates::ItemTreeTemplate;
 use axum::{
-    extract::{self, Path}, http::Uri, response::{Html, IntoResponse}
+    extract::{self, Path},
+    http::Uri,
+    response::{Html, IntoResponse},
 };
-use blaim_db::BorrowUpdates;
 use rand::{Rng, distr::Alphanumeric};
 use reqwest::StatusCode;
-use time::OffsetDateTime;
 use tower_sessions::Session;
 
-use crate::{AppState, BlaimError, session::BlaimSession, templates};
+use crate::{AppState, BlaimError};
 
 #[axum::debug_handler]
 pub async fn query_item_search(
@@ -28,7 +36,13 @@ pub async fn query_item_search(
         session,
         extract::State(state),
         Path((name, item.id)),
-        format!("/item/{}/{}", filters::urlencode_strict(item.name.clone()).unwrap(), item.id).parse().unwrap()
+        format!(
+            "/item/{}/{}",
+            filters::urlencode_strict(item.name.clone()).unwrap(),
+            item.id
+        )
+        .parse()
+        .unwrap(),
     )
     .await
 }
@@ -38,7 +52,7 @@ pub async fn query_item(
     session: Session,
     extract::State(state): extract::State<AppState>,
     Path((_name, id)): Path<(String, i32)>,
-    uri: Uri
+    uri: Uri,
 ) -> Result<(StatusCode, Html<String>), BlaimError> {
     let auth: Option<BlaimSession> = session.get("session").await.ok().flatten();
 
@@ -58,7 +72,7 @@ pub async fn query_item(
             let auth = BlaimSession::Challenged {
                 at: OffsetDateTime::now_utc(),
                 state: oauth_state,
-                redirect: uri.to_string()
+                redirect: uri.to_string(),
             };
             session.insert("session", &auth).await?;
             auth
@@ -89,7 +103,7 @@ pub async fn query_item(
     let borrow_history = futures::future::try_join_all(borrow_history).await?;
     let box_contents = blaim_db::box_contents(&mut *state.pool.acquire().await?, &item).await?;
 
-    let template = templates::item_status::ItemStatusTemplate {
+    let template = ItemStatusTemplate {
         item,
         owner,
         borrow_history,
@@ -99,4 +113,16 @@ pub async fn query_item(
     };
 
     Ok((StatusCode::OK, Html(template.render()?)))
+}
+
+#[derive(Template)]
+#[template(path = "item_status.html")]
+pub struct ItemStatusTemplate {
+    pub session: BlaimSession,
+
+    pub item: Item,
+    pub box_contents: ItemTree,
+    pub owner: Option<Owner>,
+    pub borrow_history: Vec<(Owner, OffsetDateTime)>,
+    pub borrow_updates: Option<BorrowUpdates>,
 }

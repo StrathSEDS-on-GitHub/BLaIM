@@ -1,9 +1,7 @@
-use askama::Template;
 use axum::{
     Router,
-    extract::State,
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::IntoResponse,
     routing::{get, post},
 };
 use color_eyre::eyre::Context;
@@ -11,7 +9,7 @@ use sqlx::PgPool;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tower_sessions::cookie::SameSite;
 
-use crate::routes::{authorize, borrow_item, give_item, query_item, query_item_search};
+use crate::routes::{authorize, borrow_item, give_item, home, query_item, query_item_search};
 
 mod routes;
 mod session;
@@ -45,8 +43,13 @@ async fn main() -> color_eyre::Result<()> {
         )
         .route("/borrow/{:item}", post(borrow_item))
         .route("/authorize", get(authorize))
-        .route("/members", get(routes::list_members))
         .route("/give/{:item}", post(give_item))
+        .nest(
+            "/api",
+            Router::new()
+                .route("/members", get(routes::api::list_members))
+                .route("/items", get(routes::api::list_items)),
+        )
         .nest_service("/pkg", ServeDir::new("pkg"))
         .layer(TraceLayer::new_for_http())
         .layer(tower_sessions::SessionManagerLayer::new(storage).with_same_site(SameSite::Lax))
@@ -77,9 +80,4 @@ impl IntoResponse for BlaimError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("{:#}", self.0)).into_response()
     }
-}
-
-async fn home(state: State<AppState>) -> Result<impl IntoResponse, BlaimError> {
-    let items = blaim_db::get_all_items(&mut *state.pool.acquire().await?).await?;
-    Ok(Html(templates::home::Home { items }.render()?))
 }

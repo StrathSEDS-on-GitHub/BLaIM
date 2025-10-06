@@ -7,7 +7,16 @@ use axum::{
 use reqwest::header;
 use tower_sessions::Session;
 
-use crate::{AppState, BlaimError, session::BlaimSession, templates};
+use crate::{session::BlaimSession, AppState, BlaimError};
+
+use askama::filters;
+use blaim_db::{Member, MemberOwner, Owner};
+
+#[derive(Template)]
+#[template(path = "members.js", escape = "none")]
+pub struct MembersTemplate {
+    pub all_members: Vec<Member>,
+}
 
 #[axum::debug_handler]
 pub async fn list_members(
@@ -19,7 +28,7 @@ pub async fn list_members(
         return Ok((StatusCode::FORBIDDEN, Html("Invalid session.")).into_response());
     };
 
-    let rendered = templates::members::MembersTemplate {
+    let rendered = MembersTemplate {
         all_members: blaim_db::get_all_cached_members(&mut *state.pool.acquire().await?).await?,
     }
     .render()?;

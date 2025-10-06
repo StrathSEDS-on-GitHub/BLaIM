@@ -5,31 +5,50 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BLaIM</title>
-    <link rel="stylesheet" href="../pkg/style-index.css" />
+    <link rel="stylesheet" href="/pkg/style-index.css" />
+    <link rel="stylesheet" href="/pkg/css/autocomplete.css" />
 </head>
 
 <body>
-    <logo>
-        <img src="/pkg/strathseds.svg"/>
-    </logo>
 
-    <main>
-        <h1>StrathSEDS 
+    <main class="frosty">
+        <logo>
+            <img src="/pkg/strathseds.svg" />
+        </logo>
+        <h1>StrathSEDS
             <br>
-            <span style="font-weight: 400;">Logistics & Inventory</span></h1>
+            <span style="font-weight: 400;">Logistics & Inventory</span>
+        </h1>
         <searches>
             <h3>Search by item</h3>
             <form action="javascript:searchItem()" method="get">
-                <datalist id="items">
-                    {% for item in items %}
-                    <option value="{{ item.name }}"></option>
-                    {% endfor %}
-                </datalist>
-                <input type="text" placeholder="Item" required list="items" />
+                <autocomplete-container>
+                    <input type="text" name="search" placeholder="Enter an item..." id="user-input" required
+                        autocomplete="off" />
+                    <ul id="user-suggest">
+                    </ul>
+                </autocomplete-container>
+                <script defer src="/api/items"></script>
+                <script defer id="items" src="/pkg/js/autocomplete.js"></script>
+                <script>
+                    document.getElementById("items").onload = () =>{
+                        autocomplete(
+                            document.getElementById("user-input"),
+                            document.getElementById("user-suggest"),
+                            null,
+                            null,
+                            ITEMS,
+                            (item, value) =>
+                                item.data.strid.toLowerCase().includes(value.toLowerCase()) ||
+                                item.data.name.toLowerCase().includes(value.toLowerCase()),
+                            300
+                        );
+                    }
+                </script>
                 <button type="submit">Search</button>
             </form>
         </searches>
-        
+
     </main>
 
     <script>
@@ -44,4 +63,5 @@
         }
     </script>
 </body>
+
 </html>

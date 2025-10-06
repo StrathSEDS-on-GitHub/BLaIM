@@ -10,7 +10,7 @@ use serde_json::Value;
 use sqlx::types::time::{OffsetDateTime, PrimitiveDateTime};
 use sqlx::{Acquire, PgConnection, PgPool, Row};
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct Item {
     pub id: i32,
     pub name: String,

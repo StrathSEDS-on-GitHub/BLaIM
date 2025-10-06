@@ -101,7 +101,7 @@ avatar-container {
 
 item-tree {
     item-name {
-        font-size: 1.2em;
+        font-size: 1.1em;
 
         a {
             i {
@@ -220,6 +220,7 @@ item-card {
             align-items: center;
             gap: 10px;
             position: relative;
+            text-wrap: nowrap;
 
             &:hover {
                 outline: 1px solid #92d8c6;
@@ -241,83 +242,6 @@ item-card {
                     max-height: 22px;
                 }
             }
-
-
-            autocomplete-container {
-                position: relative;
-                z-index: 0;
-
-                input {
-                    background-color: #263e53;
-                    border: none;
-                    color: #92d8c6;
-                    border-radius: 20px;
-                    padding: 5px 10px 5px 30px;
-                    width: 150px;
-
-                    &:focus {
-                        outline: 1px solid #92d8c6;
-                        background-color: #3f5c77;
-                    }
-
-                    z-index: 2;
-                    position: relative;
-                }
-
-                input:focus+ul, ul:hover {
-                    max-height: 100px;
-                    overflow-y: auto;
-                    padding-top: 10px;
-                }
-
-                & > avatar-container {
-                    position: absolute;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    left: 6px;
-                    z-index: 3;
-                    img {
-                        max-height: 20px;
-                    }
-                }
-
-                ul {
-                    max-height: 0;
-                    transition: max-height 0.3s;
-                    position: absolute;
-                    top: 20px;
-                    left: 0;
-                    margin: 0;
-                    list-style: none;
-                    background-color: #192a3a;
-                    width: 100%;
-                    border-bottom-right-radius: 20px;
-                    border-bottom-left-radius: 20px;
-                    overflow: hidden;
-                    z-index: 1;
-                    padding: 0;
-
-                    li {
-                        padding: 5px 10px 5px 10px;
-                        cursor: pointer;
-                        span {
-                            text-overflow: ellipsis;
-                            overflow: hidden;
-
-                        }
-                        text-wrap: nowrap;
-
-                        &:hover {
-                            background-color: #283138;
-                        }
-
-                        border-bottom: 1px solid #283138;
-                    }
-                }
-
-            }
-
-
         }
 
     }
@@ -516,7 +440,7 @@ item-card {
                 backdrop-filter: blur(15px);
 
                 item-name {
-                    font-size: 1.4em;
+                    font-size: 1.2em;
                 }
             }
         }
@@ -529,7 +453,7 @@ item-card {
         h2 {
             margin: 0;
             margin-left: min(80px, 10vw);
-            font-size: 1.7em;
+            font-size: 1.4em;
         }
 
         borrow-history {
@@ -585,6 +509,10 @@ item-card {
             borrow-owner {
                 padding: 10px 0 10px 0;
                 align-items: center;
+                
+                avatar-container {
+                    font-size: 1.2em;
+                }
             }
         }
     }

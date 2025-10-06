@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use tower_sessions::Session;
 use tracing::info;
 
-use crate::{AppState, BlaimError, session::BlaimSession, templates::OAUTH_REDIRECT_URI};
+use crate::{session::BlaimSession, templates::OAUTH_REDIRECT_URI, AppState, BlaimError};
 
 #[derive(serde::Deserialize)]
 pub struct AuthorizeQuery {
