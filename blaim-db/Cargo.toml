@@ -12,3 +12,4 @@ sqlx.workspace = true
 tokio.workspace = true
 color-eyre.workspace = true
 serde.workspace = true
+futures = "0.3.31"

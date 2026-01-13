@@ -10,6 +10,9 @@ use serde_json::Value;
 use sqlx::types::time::{OffsetDateTime, PrimitiveDateTime};
 use sqlx::{Acquire, PgConnection, PgPool, Row};
 
+mod itemtree;
+pub use itemtree::*;
+
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct Item {
     pub id: i32,
@@ -171,6 +174,18 @@ pub async fn get_owner_info(conn: &mut PgConnection, owner_str: &str) -> color_e
         // Owned by a user
         let snowflake = owner_str.parse::<u64>().wrap_err("Non snowflake in DB")?;
         try_resolve_member(conn, snowflake).await.map(Owner::Member)
+    }
+}
+
+pub async fn get_owner(
+    connection: &mut PgConnection,
+    item_id: i32,
+) -> color_eyre::Result<Option<Owner>> {
+    let owner = get_last_holder(&mut *connection, item_id).await?;
+    if let Some(owner) = owner {
+        Ok(Some(get_owner_info(&mut *connection, &owner).await?))
+    } else {
+        Ok(None)
     }
 }
 
@@ -527,131 +542,6 @@ pub async fn unbox_all(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct ItemTreeNode {
-    pub item: Item,
-    pub present: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ItemTree {
-    pub item: ItemTreeNode,
-    pub children: Vec<ItemTree>,
-}
-
-impl ItemTree {
-    pub fn new(item: Item, present: bool) -> Self {
-        Self {
-            item: ItemTreeNode { item, present },
-            children: Vec::new(),
-        }
-    }
-
-    fn add_children(
-        &mut self,
-        children: impl Iterator<Item = ItemTree>,
-    ) -> impl Iterator<Item = &mut ItemTree> {
-        let start = self.children.len();
-        self.children.extend(children);
-
-        self.children[start..].iter_mut()
-    }
-
-    fn find(&self, id: i32) -> Option<&ItemTree> {
-        if self.item.item.id == id {
-            return Some(self);
-        }
-        for child in &self.children {
-            if let Some(tree) = child.find(id) {
-                return Some(tree);
-            }
-        }
-        None
-    }
-
-    pub fn iter_depth_first(&self) -> impl Iterator<Item = (usize, &ItemTreeNode, bool)> {
-        let mut stack = vec![(0, self, true)];
-        std::iter::from_fn(move || {
-            if let Some((depth, tree, s)) = stack.pop() {
-                if let Some((last, most)) = tree.children.split_last() {
-                    stack.push((depth + 1, last, true));
-                    most.iter().rev().for_each(|child| {
-                        stack.push((depth + 1, child, false));
-                    });
-                }
-
-                Some((depth, &tree.item, s))
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn into_iter_depth_first(self) -> impl Iterator<Item = (usize, ItemTreeNode, bool)> {
-        let mut stack = vec![(0, self, true)];
-        std::iter::from_fn(move || {
-            if let Some((depth, tree, s)) = stack.pop() {
-                if let Some((last, most)) = tree.children.split_last() {
-                    stack.push((depth + 1, last.clone(), true));
-                    most.iter().rev().for_each(|child| {
-                        stack.push((depth + 1, child.clone(), false));
-                    });
-                }
-
-                Some((depth, tree.item, s))
-            } else {
-                None
-            }
-        })
-    }
-}
-
-impl Display for ItemTree {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.iter_depth_first()
-            .try_for_each(|(depth, it, last_child)| {
-                let prefix_size = depth * 4;
-                let tree_icon = if depth == 0 {
-                    "  "
-                } else if last_child {
-                    "└─"
-                } else {
-                    "├─"
-                };
-                let present_icon = if it.present { "🟢" } else { "🔴" };
-                writeln!(
-                    f,
-                    "{: <prefix_size$}{tree_icon} {present_icon} {}",
-                    "", it.item.name
-                )
-            })
-    }
-}
-
-impl FromIterator<(usize, ItemTreeNode, bool)> for ItemTree {
-    fn from_iter<T: IntoIterator<Item = (usize, ItemTreeNode, bool)>>(iter: T) -> Self {
-        let mut iter = iter.into_iter();
-        let root_node = iter.next().unwrap().1;
-        let mut root = ItemTree::new(root_node.item, root_node.present);
-
-        let mut stack = vec![&mut root as *mut ItemTree];
-        for (depth, node, _) in iter {
-            stack.truncate(depth);
-            let tree = ItemTree::new(node.item, node.present);
-
-            unsafe {
-                let parent = stack.last_mut().unwrap();
-                let ptr = (**parent)
-                    .add_children(std::iter::once(tree))
-                    .next()
-                    .unwrap() as *mut ItemTree;
-                stack.push(ptr);
-            }
-        }
-        root
-    }
-}
-
 pub async fn box_contents(
     connection: &mut PgConnection,
     r#box: &Item,
@@ -686,6 +576,55 @@ pub async fn box_contents(
     Ok(root)
 }
 
+pub async fn box_contents_with_owner(
+    pool: &mut PgPool,
+    r#box: &Item,
+) -> color_eyre::Result<ItemTreeOwned> {
+    let mut root: ItemTreeOwned = ItemTreeOwned::new_associated(
+        r#box.clone(),
+        true,
+        get_owner(&mut *pool.acquire().await?, r#box.id).await?,
+    );
+    let mut open_set = VecDeque::new();
+    open_set.push_back(&mut root);
+    while let Some(tree) = open_set.pop_front() {
+        let children = sqlx::query!(
+            "SELECT i.id, i.name, i.strid, m.present, (SELECT to_user FROM borrow WHERE item_id = i.id ORDER BY ordering DESC LIMIT 1) AS owner
+                FROM meta m
+                JOIN items i ON m.child = i.id
+                WHERE m.parent = $1",
+            tree.item.item.id
+        )
+        .fetch_all(&mut *pool.acquire().await?)
+        .await?;
+
+        let child_trees = children.into_iter().map(async |item| {
+            let owner = if let Some(owner_str) = item.owner {
+                Some(get_owner_info(&mut *pool.acquire().await?, &owner_str).await?)
+            } else {
+                None
+            };
+
+            Ok::<_, color_eyre::Report>(ItemTreeOwned::new_associated(
+                Item {
+                    id: item.id,
+                    strid: item.strid,
+                    name: item.name,
+                },
+                item.present,
+                owner,
+            ))
+        });
+
+        let child_trees = futures::future::try_join_all(child_trees)
+            .await?
+            .into_iter();
+
+        open_set.extend(tree.add_children(child_trees));
+    }
+    Ok(root)
+}
+
 pub async fn get_all_items(conn: &mut PgConnection) -> color_eyre::Result<Vec<Item>> {
     let items = sqlx::query_as!(Item, "SELECT id, strid, name FROM items;")
         .fetch_all(&mut *conn)
@@ -696,8 +635,33 @@ pub async fn get_all_items(conn: &mut PgConnection) -> color_eyre::Result<Vec<It
 pub async fn get_all_itemtrees(
     connection: &mut PgConnection,
 ) -> color_eyre::Result<HashMap<Option<String>, Vec<ItemTree>>> {
-    let single_conn = connection.acquire().await?;
-    let roots: Vec<(Option<String>, i32, String, String)> = sqlx::query_as(
+    let mut trees = HashMap::new();
+    let roots = get_itemtree_roots(connection).await?;
+    for (owner, item) in roots {
+        let tree = box_contents(&mut *connection, &item).await?;
+        trees.entry(owner).or_insert(Vec::new()).push(tree);
+    }
+
+    Ok(trees)
+}
+
+pub async fn get_all_itemtrees_with_owner(
+    pool: &mut PgPool,
+) -> color_eyre::Result<Vec<ItemTreeOwned>> {
+    let mut trees = Vec::new();
+    let roots = get_itemtree_roots(&mut *pool.acquire().await?).await?;
+    for (_, item) in roots {
+        let tree = box_contents_with_owner(pool, &item).await?;
+        trees.push(tree);
+    }
+
+    Ok(trees)
+}
+
+pub async fn get_itemtree_roots(
+    connection: &mut PgConnection,
+) -> color_eyre::Result<Vec<(Option<String>, Item)>> {
+    Ok(sqlx::query_as(
         "SELECT b.to_user, i.id, i.strid, i.name
             FROM borrow b
             JOIN (
@@ -711,16 +675,13 @@ pub async fn get_all_itemtrees(
                 OR max_orders.max_ordering IS NULL) 
                 AND (m.parent IS NULL OR m.present IS FALSE);",
     )
-    .fetch_all(&mut *single_conn)
-    .await?;
-    let mut trees = HashMap::new();
-    for (owner, id, strid, name) in roots {
-        let tree = box_contents(&mut *single_conn, &Item { id, strid, name }).await?;
-        trees.entry(owner).or_insert(Vec::new()).push(tree);
-    }
-
-    Ok(trees)
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .map(|(owner, id, strid, name)| (owner, Item { id, strid, name }))
+    .collect())
 }
+
 pub async fn get_itemtrees(
     connection: &mut PgConnection,
     user: impl AsRef<str>,
@@ -802,8 +763,6 @@ pub struct Member {
     pub avatar: Option<String>,
 }
 
-/// JS has a single numeric type and it is fuckING 64-bit floating point.
-/// So `u64` snowflake gets converted to string.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JsSafeMember {
     pub id: String,
@@ -813,12 +772,15 @@ pub struct JsSafeMember {
 }
 
 impl Member {
+    /// JS has a single numeric type and it is fuckING 64-bit floating point.
+    /// So this fucking abomination is necessary to avoid loss of precision
+    /// when representing the u64 `id`.
     pub fn to_js_safe(&self) -> JsSafeMember {
         JsSafeMember {
             id: self.id.to_string(),
             nick: self.nick.clone(),
-            username: self.username.clone(),
             avatar: self.avatar.clone(),
+            username: self.username.clone(),
         }
     }
 }
@@ -838,7 +800,8 @@ pub enum Owner {
 impl<'de> Deserialize<'de> for Owner {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> {
+        D: serde::Deserializer<'de>,
+    {
         let s = String::deserialize(deserializer)?;
         s.as_str().try_into().map_err(serde::de::Error::custom)
     }
@@ -858,7 +821,7 @@ impl TryFrom<&str> for Owner {
             Ok(Owner::Member(MemberOwner::Unresolved(snowflake)))
         } else {
             Err("Invalid owner string")
-        } 
+        }
     }
 }
 

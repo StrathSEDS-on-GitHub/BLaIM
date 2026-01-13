@@ -265,6 +265,7 @@ name = "blaim-db"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
+ "futures",
  "fuzzy-matcher",
  "reqwest 0.12.23",
  "serde",
