@@ -1,5 +1,8 @@
 use askama::Template;
-use blaim_db::{ItemTree, ItemTreeNode};
+use blaim_db::{
+    ItemTree, ItemTreeImpl, ItemTreeNode, ItemTreeNodeImpl, ItemTreeNodeOwned, ItemTreeOwned,
+    MemberOwner, Owner,
+};
 use rand::seq::IndexedRandom;
 use sqlx::types::time::OffsetDateTime;
 
@@ -79,6 +82,7 @@ macro_rules! closure {
 #[derive(Template)]
 #[template(
     source = r#"
+{% import "macros.html" as macros %}
 {% if children.len() > 0 %}
    <item-name> 
         <a href="/item/{{ item.item.name }}/{{ item.item.id }}">
@@ -122,6 +126,78 @@ impl From<&ItemTree> for ItemTreeTemplate {
         ItemTreeTemplate {
             item: value.item.clone(),
             children: value.children.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(
+    source = r#"
+{% import "macros.html" as macros %}
+{% if tree.children.len() > 0 %}
+   <item-name data-tree-depth="{{ tree.item.associated.1 }}"> 
+        <a href="/item/{{ tree.item.item.name }}/{{ tree.item.item.id }}">
+            <i class="fa fa-archive" aria-hidden="true"></i>
+            {% if tree.item.present %}
+                {{ tree.item.item.name }}
+            {% else %}
+                <span class="not-within-box">{{ tree.item.item.name }} </span>
+            {% endif %}
+        </a> 
+    </item-name>
+    {% call macros::show_owner(tree.item.associated.0) %}
+<ul>
+    {% for child in tree.children %}
+            <li> {{ ItemTreeOwnedTemplate::new(child).render()? }} </li>
+    {% endfor %}
+</ul>
+{% else %}
+   <item-name data-tree-depth="{{ tree.item.associated.1 }}"> 
+        <a href="/item/{{ tree.item.item.name }}/{{ tree.item.item.id }}">
+            {% if tree.item.present %}
+                <i class="fa fa-check-circle" title="Within box" aria-hidden="true"></i>
+                {{ tree.item.item.name }} 
+            {% else %}
+                <i class="fa fa-circle-o" title="Not within box" aria-hidden="true"></i>
+                <span class="not-within-box">{{ tree.item.item.name }} </span>
+            {% endif %}
+        </a> 
+    </item-name>
+    {% call macros::show_owner(tree.item.associated.0) %}
+{% endif %}
+"#,
+    ext = "html",
+    escape = ""
+)]
+pub struct ItemTreeOwnedTemplate {
+    pub tree: ItemTreeImpl<(Option<Owner>, usize)>,
+}
+
+impl ItemTreeOwnedTemplate {
+    pub fn new(tree: &ItemTreeImpl<(Option<Owner>, usize)>) -> Self {
+        Self { tree: tree.clone() }
+    }
+}
+
+impl From<&ItemTreeOwned> for ItemTreeOwnedTemplate {
+    fn from(value: &ItemTreeOwned) -> Self {
+        let iter = value
+            .clone()
+            .into_iter_depth_first()
+            .map(|(depth, node, last)| {
+                (
+                    depth,
+                    ItemTreeNodeImpl {
+                        item: node.item,
+                        present: node.present,
+                        associated: (node.associated, depth),
+                    },
+                    last,
+                )
+            });
+
+        ItemTreeOwnedTemplate {
+            tree: ItemTreeImpl::from_iter(iter),
         }
     }
 }

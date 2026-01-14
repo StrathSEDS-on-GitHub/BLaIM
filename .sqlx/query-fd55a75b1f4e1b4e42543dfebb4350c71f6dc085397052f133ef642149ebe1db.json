@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.name, i.strid, m.present, (SELECT to_user FROM borrow WHERE item_id = i.id ORDER BY ordering DESC LIMIT 1) AS owner\n                FROM meta m\n                JOIN items i ON m.child = i.id\n                WHERE m.parent = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "strid",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "present",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "fd55a75b1f4e1b4e42543dfebb4350c71f6dc085397052f133ef642149ebe1db"
+}

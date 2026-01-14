@@ -83,13 +83,7 @@ pub async fn query_item(
         return Ok((StatusCode::NOT_FOUND, Html("No such item.".to_owned())));
     };
 
-    let owner = blaim_db::get_last_holder(&mut *state.pool.acquire().await?, id).await?;
-    let owner = if let Some(owner) = owner {
-        Some(blaim_db::get_owner_info(&mut *state.pool.acquire().await?, &owner).await?)
-    } else {
-        None
-    };
-
+    let owner = blaim_db::get_owner(&mut *state.pool.acquire().await?, id).await?;
     let borrow_history = blaim_db::borrow_history(&mut *state.pool.acquire().await?, item.id)
         .await?
         .into_iter()

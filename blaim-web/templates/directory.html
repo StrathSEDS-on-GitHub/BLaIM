@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLaIM</title>
+    <link rel="stylesheet" href="/pkg/style-directory.css" />
+    <link rel="stylesheet" href="/pkg/style.css" />
+    <link rel="stylesheet" href="/pkg/css/font-awesome.min.css" />
+    <link rel="stylesheet" href="/pkg/style-index.css" />
+</head>
+
+<body>
+    <main-directory class="frosty">
+        <h2>Directory</h2>
+        <directory-listing>
+            <ul>
+                {% for item in items.iter() %}
+                    <li>
+                        <owned-item-tree>
+                            {{ ItemTreeOwnedTemplate::from(*item) | safe }}
+                        </owned-item-tree>
+                    </li>
+                {% endfor %}
+            </ul>
+        </directory-listing>
+    </main-directory>
+</body>
+
+</html>

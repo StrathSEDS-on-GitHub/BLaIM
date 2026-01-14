@@ -118,3 +118,21 @@ searches {
     pointer-events: none;
     z-index: -1;
 }
+
+.button-directory {
+    position: relative;
+    z-index: 2;
+    display: block;
+    padding: 10px;
+    padding-left: 20px;
+    padding-right: 20px;
+    font-size: 1.2em;
+    width: fit-content;
+    margin-top: 20px;
+    text-decoration: none;
+    color: #a4c9c9;
+}
+
+.button-directory:hover {
+    color: #e1f0f0;
+}

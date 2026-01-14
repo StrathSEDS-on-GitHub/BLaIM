@@ -5,7 +5,8 @@ use std::env;
 use std::future::Future;
 use std::pin::Pin;
 
-use blaim_db::ItemTree;
+use ::time::format_description::well_known::Rfc2822;
+use blaim_db::{BorrowUpdates, ItemTree};
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{
     ButtonStyle, ClientBuilder, ComponentInteractionCollector, CreateActionRow, CreateButton,
@@ -17,7 +18,6 @@ use serenity::prelude::*;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::types::time::OffsetDateTime;
 use sqlx::{Acquire, PgConnection, PgPool};
-use ::time::format_description::well_known::Rfc2822;
 
 struct Data {
     pool: PgPool,
@@ -88,7 +88,10 @@ async fn make_embed(
     from: &Option<String>,
     to: &str,
     alternatives: &[blaim_db::Item],
-    (updated_items, present_updates): &(ItemTree, Vec<(blaim_db::Item, blaim_db::Item, bool)>),
+    BorrowUpdates {
+        updated_items,
+        present_updates,
+    }: BorrowUpdates,
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
     let previous_owner = if let Some(owner) = from {
         format_owner(transaction, owner).await
@@ -107,7 +110,9 @@ async fn make_embed(
             ":red_square: **-** {} \n:arrow_down:\n:green_square: **+** {}",
             previous_owner, new_owner
         ))
-        .footer(CreateEmbedFooter::new(OffsetDateTime::now_utc().format(&Rfc2822).unwrap()));
+        .footer(CreateEmbedFooter::new(
+            OffsetDateTime::now_utc().format(&Rfc2822).unwrap(),
+        ));
 
     let boxed_items_count = updated_items.iter_depth_first().collect::<Vec<_>>().len() - 1;
     if boxed_items_count > 0 {
@@ -181,7 +186,11 @@ async fn handle_edits<T>(
         &'a mut PgConnection,
         i32,
     ) -> Pin<
-        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<
+            dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>>
+                + Send
+                + 'a,
+        >,
     >,
     mut embed: CreateEmbed,
     connection: &mut PgConnection,
@@ -318,7 +327,11 @@ async fn borrow(
                         connection: &'a mut PgConnection,
                         item_id: i32|
              -> Pin<
-        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<
+            dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -328,14 +341,15 @@ async fn borrow(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let results = blaim_db::borrow_item(&mut *connection, selected, &state.author_id).await?;
+            let results =
+                blaim_db::borrow_item(&mut *connection, selected, &state.author_id).await?;
             let (embed, components) = make_embed(
                 connection,
                 &selected,
                 &state.previous_owner,
                 &state.author_id,
                 &alternatives,
-                &results,
+                results,
             )
             .await;
             Ok((embed, components))
@@ -542,11 +556,12 @@ async fn storage(
     }
 
     let location = if let Some(location) = location {
-        let Some(location) = blaim_db::lookup_storage(&mut *ctx.data().pool.acquire().await?, &location)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .next()
+        let Some(location) =
+            blaim_db::lookup_storage(&mut *ctx.data().pool.acquire().await?, &location)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .next()
         else {
             let embed = CreateEmbed::new()
                 .title("No storage found")
@@ -675,7 +690,11 @@ async fn store(
                         connection: &'a mut PgConnection,
                         item_id: i32|
              -> Pin<
-        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<
+            dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -685,14 +704,15 @@ async fn store(
                 .filter(|it| it.id != item_id)
                 .cloned()
                 .collect::<Vec<_>>();
-            let results = blaim_db::borrow_item(&mut *connection, selected, &state.location).await?;
+            let results =
+                blaim_db::borrow_item(&mut *connection, selected, &state.location).await?;
             let (embed, components) = make_embed(
                 &mut *connection,
                 &selected,
                 &state.previous_owner,
                 &state.location,
                 &alternatives,
-                &results,
+                results,
             )
             .await;
             Ok((embed, components))
@@ -705,7 +725,10 @@ async fn store(
         location: format!("loc:{}", location.strid),
     };
 
-    println!("Storing item {} in location '{}'", selected.name, location.strid);
+    println!(
+        "Storing item {} in location '{}'",
+        selected.name, location.strid
+    );
 
     let (embed, components) = task(&state, &mut *transaction, selected.id).await?;
     let reply = CreateReply::default()
@@ -800,7 +823,11 @@ async fn give(
                         connection: &'a mut PgConnection,
                         item_id: i32|
              -> Pin<
-        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<
+            dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
@@ -817,7 +844,7 @@ async fn give(
                 &state.previous_owner,
                 &state.user_id,
                 &alternatives,
-                &results,
+                results,
             )
             .await;
             Ok((embed, components))
@@ -916,7 +943,11 @@ async fn item_delete(
                         connection: &'a mut PgConnection,
                         item_id: i32|
              -> Pin<
-        Box<dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>> + Send + 'a>,
+        Box<
+            dyn Future<Output = color_eyre::Result<(CreateEmbed, Vec<CreateActionRow>)>>
+                + Send
+                + 'a,
+        >,
     > {
         Box::pin(async move {
             let selected = state.items.iter().find(|it| it.id == item_id).unwrap();
