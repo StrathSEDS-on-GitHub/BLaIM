@@ -200,7 +200,41 @@ owned-item-tree {
             font-style: italic;
         }
     }
+}
+@media screen and (width <=600px) {
+    owned-item-tree {
+        grid-template-columns: 1fr;
 
+        & ul {
+            grid-column: span 1;
+
+            & li {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        avatar-container {
+            justify-content: start;
+            margin-top: -15px;
+        }
+
+        item-name[data-tree-depth="0"] + avatar-container {
+            margin-left: 30px;
+        }
+        item-name[data-tree-depth="1"] + avatar-container {
+            margin-left: 60px;
+        }
+        item-name[data-tree-depth="2"] + avatar-container {
+            margin-left: 90px;
+        }
+        item-name[data-tree-depth="3"] + avatar-container {
+            margin-left: 120px;
+        }
+        item-name[data-tree-depth="4"] + avatar-container {
+            margin-left: 150px;
+        }
+    }
+    
 }
 
 item-name {

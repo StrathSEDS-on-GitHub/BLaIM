@@ -6,6 +6,15 @@ directory-listing {
     }
 }
 
+@media screen and (width <= 600px) {
+    directory-listing {
+        & ul > li {
+            padding-bottom: 15px;
+        }
+    }
+    
+}
+
 main-directory {
     display: block;
     margin: auto;
