@@ -2,7 +2,11 @@ function assignInput(event, member, idx) {
     event.preventDefault();
     REGISTRY[idx].input.value = member.nick || member.username || member.name;
 
-    if (!REGISTRY[idx].idInput) return;
+
+    if (!REGISTRY[idx].idInput) {
+        document.querySelector('form > button').click();
+        return;
+    }
 
     REGISTRY[idx].idInput.value = member.id;
 

@@ -1,6 +1,6 @@
 autocomplete-container {
     position: relative;
-    z-index: 0;
+    z-index: 3;
 
     input {
         background-color: #263e53;
@@ -15,7 +15,7 @@ autocomplete-container {
             background-color: #3f5c77;
         }
 
-        z-index: 2;
+        z-index: 4;
         position: relative;
     }
 
@@ -31,7 +31,7 @@ autocomplete-container {
         top: 50%;
         transform: translateY(-50%);
         left: 6px;
-        z-index: 3;
+        z-index: 5;
 
         img {
             max-height: 20px;
