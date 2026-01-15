@@ -15,7 +15,10 @@
 <body>
     <main>
         <item-card class="frosty">
-            <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
+
+            <header-bar><a href="/">←</a>
+                <item-info><item-name>{{ item.name }}</item-name> <item-strid> {{ item.strid }}</item-strid></item-info>
+            </header-bar>
             <item-owner {% match session %} {% when BlaimSession::Authenticated { member } %} {% if owner.as_ref()
                 .and_then(closure!(it, { it.snowflake() })) .map(closure!(id, id==member.id)). unwrap_or(false) %}
                 class="you" {% endif %} {% when _ %} {% endmatch %}>

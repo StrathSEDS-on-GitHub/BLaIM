@@ -2,13 +2,14 @@ directory-listing {
     & ul {
         list-style-type: none;
         text-align: left;
+        padding: 0;
     }
 }
 
 main-directory {
     display: block;
     margin: auto;
-    max-width: 800px;
+    max-width: min(800px, 90vw);
     width: 100%;
     border-radius: 20px;
     position: relative;

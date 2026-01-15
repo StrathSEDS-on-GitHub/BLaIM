@@ -1,10 +1,7 @@
 use std::fmt::{self, Display};
 
 use crate::Item;
-
 use crate::Owner;
-
-use super::*;
 
 #[derive(Debug, Clone)]
 pub struct ItemTreeNodeImpl<T> {

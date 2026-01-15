@@ -37,7 +37,7 @@ main::after {
 
 main {
     margin: auto;
-    max-width: 600px;
+    max-width: min(600px, 90vw);
     padding: 50px;
     text-align: center;
     position: relative;

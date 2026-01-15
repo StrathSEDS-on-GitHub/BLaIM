@@ -43,6 +43,20 @@ main::before {
     backdrop-filter: blur(100px);
 }
 
+header-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    > a {
+        text-decoration: none;
+        color: #92d8c6;
+        font-weight: 600;
+        font-size: 1.5em;
+        margin-right: 20px;
+
+    }
+}
+
 avatar-container {
     img {
         clip-path: circle(50%);
@@ -101,6 +115,7 @@ avatar-container {
 owned-item-tree {
     display: grid;
     grid-template-columns: 2fr 1fr;
+    gap: 10px;
     flex-direction: row;
     justify-content: space-between;
     width: 100%;
@@ -132,6 +147,7 @@ owned-item-tree {
             }
             display: grid;
             grid-template-columns: 2fr 1fr;
+            gap: 10px;
             position: relative;
         }
 
