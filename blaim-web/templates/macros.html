@@ -3,7 +3,7 @@
 {% match arg %}
 {% when Some(Owner::Location(loc)) %}
 <avatar-container>
-    <img src="/pkg/storage.svg"> <span>{{loc.name}}</span>
+    <img src="/pkg/storage.svg"> <a href="/user/{{loc.name | urlencode}}/loc:{{loc.id}}">{{loc.name}}</a>
 </avatar-container>
 {% when Some(Owner::Member(MemberOwner::Resolved(x))) %}
 {% let avatar_url %}
@@ -16,14 +16,15 @@
 {% let display_name = x.nick.as_ref().unwrap_or(&x.username) %}
 
 <avatar-container>
-    <img src="{{avatar_url}}"> <span {% if x.nick.is_some() %} title="{{x.username}}" {% endif
-        %}>{{display_name}}</span>
+    <img src="{{avatar_url}}"> <a href="/user/{{display_name | urlencode}}/{{x.id | urlencode}}" {% if x.nick.is_some() %} title="{{x.username}}" {% endif
+        %}>{{display_name}}</a>
 </avatar-container>
 
 {% when Some(Owner::Member(MemberOwner::Unresolved(id))) %}
 <avatar-container>
-    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <span title="{{id}}"
-        class="unresolved">Unresolved</span>
+    <img src="/pkg/gotye.png" title="Maybe somebody you used to know?"> <a title="{{id}}"
+        href="/user/{{id}}/{{id}}"
+        class="unresolved">Unresolved</a>
 </avatar-container>
 
 {% when None %}

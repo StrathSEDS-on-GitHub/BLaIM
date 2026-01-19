@@ -1,0 +1,41 @@
+{% import "macros.html" as macros %}
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLaIM</title>
+    <link rel="stylesheet" href="/pkg/style-user.css" />
+    <link rel="stylesheet" href="/pkg/style.css" />
+    <link rel="stylesheet" href="/pkg/css/font-awesome.min.css" />
+    <link rel="stylesheet" href="/pkg/style-index.css" />
+</head>
+
+<body>
+    <user-main class="frosty">
+        <header-bar><a href="/">←</a><h2>Items held by {% call macros::show_owner(Some(owner)) %}</h2></header-bar>
+        <user-items>
+            <ul>
+                {% for item in items.iter() %}
+                    <li>
+                        <item-tree>
+                            {{ ItemTreeTemplate::from(*item) | safe }}
+                        </item-tree>
+                    </li>
+                {% endfor %}
+            </ul>
+        </user-items>
+    </main-directory>
+</body>
+
+<script>
+    // URL is /user/<username>/id
+    const canonical_name = "{{ owner.to_string() }}";
+    const user_id = "{{ owner.db_string() }}";
+    const new_url = `/user/${encodeURIComponent(canonical_name)}/${encodeURIComponent(user_id)}`;
+    window.history.replaceState(null, '', new_url);
+</script>
+
+</html>

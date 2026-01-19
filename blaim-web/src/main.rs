@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tower_sessions::cookie::SameSite;
 
-use crate::routes::{authorize, borrow_item, directory, give_item, home, query_item, query_item_search};
+use crate::routes::{authorize, borrow_item, directory, give_item, home, query_item, query_item_search, user, user_search, };
 
 mod routes;
 mod session;
@@ -45,6 +45,8 @@ async fn main() -> color_eyre::Result<()> {
         .route("/authorize", get(authorize))
         .route("/give/{:item}", post(give_item))
         .route("/directory", get(directory))
+        .route("/user/{:_username}/{:user_id}", get(user))
+        .route("/user/{:username}", get(user_search))
         .nest(
             "/api",
             Router::new()

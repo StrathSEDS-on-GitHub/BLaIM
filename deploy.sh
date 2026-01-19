@@ -21,7 +21,7 @@ echo "Starting remote deployment"
 
 ssh root@blaim.strathseds.org << EOF
     set -xeuo pipefail
-    docker image rm blaim-builder
+    docker image rm blaim-builder || true
     zstd -d < /home/seds/builder.zstd | docker load
 
     # Remove build step from Dockerfile

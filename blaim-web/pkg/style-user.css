@@ -1,0 +1,25 @@
+user-items {
+    display: block;
+    position: relative;
+    padding: min(50px, 5vw);
+    margin: auto;
+    & > ul {
+        list-style-type: none;
+        text-align: left;
+        padding: 0;
+        width: fit-content;
+    }
+
+}
+
+user-main {
+    display: block;
+    margin: auto;
+    max-width: min(800px, 90vw);
+    width: 100%;
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+    z-index: 2;
+    padding: 50px
+}

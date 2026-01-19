@@ -27,19 +27,96 @@ pub struct Location {
     pub strid: String,
 }
 
-fn fuzzy_search<'b, T: std::fmt::Debug>(
+trait FuzzySearcher<'x, T> {
+    type R: Iterator<Item = &'x str> + 'x;
+    fn call(&'x mut self, item: &'x T) -> Self::R;
+}
+
+impl<'x, T, R, F> FuzzySearcher<'x, T> for F
+where
+    T: 'x,
+    R: Iterator<Item = &'x str> + 'x,
+    F: FnMut(&'x T) -> R,
+{
+    type R = R;
+    fn call(&'x mut self, i: &'x T) -> Self::R {
+        self(i)
+    }
+}
+
+fn fuzzy_search<'b, 'a, T: std::fmt::Debug + 'a, F>(
     needle: &'b str,
-    haystack: impl Iterator<Item = T> + 'b,
-    key: impl Fn(&T) -> &str,
-) -> Vec<(i64, T)> {
+    haystack: impl Iterator<Item = T>,
+    mut key: F,
+) -> Vec<(i64, T)>
+where
+    F: for<'x> FuzzySearcher<'x, T>,
+{
     static MATCHER: LazyLock<SkimMatcherV2> =
         LazyLock::new(|| SkimMatcherV2::default().smart_case().use_cache(true));
     let mut scores: Vec<_> = haystack
-        .filter_map(|s| MATCHER.fuzzy_match(key(&s), needle).map(|score| (score, s)))
+        .filter_map(|s| {
+            let x = key
+                .call(&s)
+                .map(|it| MATCHER.fuzzy_match(it, needle))
+                .max_by_key(|it| it.unwrap_or(i64::MIN))
+                .flatten();
+            if let Some(x) = x { Some((x, s)) } else { None }
+        })
         .collect();
     scores.sort_by_key(|(score, _)| -*score);
     scores.splice(scores.len().min(5).., []);
     scores
+}
+
+// NOTE: Can't be a closure due to https://github.com/rust-lang/rust/issues/70263
+macro_rules! fuzzy_searcher {
+    ($ty:ty, |$var:ident| $body:expr) => {{
+        fn searcher_impl<'a>($var: &'a $ty) -> impl Iterator<Item = &'a str> {
+            $body
+        }
+
+        searcher_impl
+    }};
+}
+
+macro_rules! fuzzy_searcher_once {
+    ($ty: ty, |$var:ident| $body:expr) => {
+        fuzzy_searcher!($ty, |$var| std::iter::once($body))
+    };
+}
+
+pub async fn lookup_user(connection: &mut PgConnection, user: &str) -> Option<Owner> {
+    let user = user.to_lowercase();
+
+    let all_users = sqlx::query!("SELECT id, nick, username, avatar FROM members;")
+        .fetch_all(&mut *connection)
+        .await
+        .unwrap();
+    let all_users = all_users.into_iter().map(|it| Member {
+        id: it.id as u64,
+        nick: it.nick,
+        username: it.username,
+        avatar: it.avatar,
+    });
+
+    let results = fuzzy_search(
+        &user,
+        all_users,
+        fuzzy_searcher!(Member, |member| {
+            [
+                member.username.as_str(),
+                member.nick.as_ref().map_or("", |v| v),
+            ]
+            .into_iter()
+        }),
+    );
+
+    if let Some((_, member)) = results.into_iter().next() {
+        Some(Owner::Member(MemberOwner::Resolved(member)))
+    } else {
+        None
+    }
 }
 
 pub async fn lookup_storage(
@@ -61,16 +138,20 @@ pub async fn lookup_storage(
         .await?
         .into_iter();
 
-    let results = fuzzy_search(&item, fuzzy_matches, |i| &i.name)
-        .into_iter()
-        .filter_map(|(_, location)| {
-            if !exact_matches.contains(&location) {
-                Some(location)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let results = fuzzy_search(
+        &item,
+        fuzzy_matches,
+        fuzzy_searcher_once!(Location, |location| location.name.as_str()),
+    )
+    .into_iter()
+    .filter_map(|(_, location)| {
+        if !exact_matches.contains(&location) {
+            Some(location)
+        } else {
+            None
+        }
+    })
+    .collect::<Vec<_>>();
 
     Ok(exact_matches.into_iter().chain(results).collect())
 }
@@ -94,16 +175,20 @@ pub async fn lookup_item(
         .await?
         .into_iter();
 
-    let results = fuzzy_search(&item, fuzzy_matches, |i| &i.name)
-        .into_iter()
-        .filter_map(|(_, item)| {
-            if !exact_matches.contains(&item) {
-                Some(item)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let results = fuzzy_search(
+        &item,
+        fuzzy_matches,
+        fuzzy_searcher_once!(Item, |i| i.name.as_str()),
+    )
+    .into_iter()
+    .filter_map(|(_, item)| {
+        if !exact_matches.contains(&item) {
+            Some(item)
+        } else {
+            None
+        }
+    })
+    .collect::<Vec<_>>();
 
     Ok(exact_matches.into_iter().chain(results).collect())
 }
@@ -839,6 +924,19 @@ impl Owner {
             Owner::Location(loc) => format!("loc:{}", loc.strid),
             Owner::Member(MemberOwner::Resolved(member)) => member.id.to_string(),
             Owner::Member(MemberOwner::Unresolved(snowflake)) => snowflake.to_string(),
+        }
+    }
+}
+
+impl Display for Owner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Owner::Location(location) => f.write_str(&location.name),
+            Owner::Member(MemberOwner::Resolved(member)) => f.write_str(member
+                .nick
+                .as_ref()
+                .unwrap_or(&member.username)),
+            Owner::Member(MemberOwner::Unresolved(id)) => f.write_fmt(format_args!("{}", id)),
         }
     }
 }
