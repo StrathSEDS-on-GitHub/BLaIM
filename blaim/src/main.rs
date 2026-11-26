@@ -21,12 +21,13 @@ use sqlx::{Acquire, PgConnection, PgPool};
 
 struct Data {
     pool: PgPool,
+    allowed_guilds: Vec<u64>
 }
 
 type Error = color_eyre::eyre::Error;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-const ALLOWED_GUILDS: &[u64] = &[755426438185877614, 366211396511334420];
+// const ALLOWED_GUILDS: &[u64] = &[1066364068795011152];
 
 async fn format_owner(connection: &mut PgConnection, owner: &str) -> String {
     if let Some(owner) = owner.strip_prefix("loc:") {
@@ -277,7 +278,7 @@ async fn borrow(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -389,7 +390,7 @@ async fn borrow(
 /// List items held by a user or all items
 #[poise::command(slash_command)]
 async fn items(ctx: Context<'_>, user: Option<User>) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -453,7 +454,7 @@ async fn blame(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -546,7 +547,7 @@ async fn storage(
     ctx: Context<'_>,
     #[autocomplete = autocomplete_store] location: Option<String>,
 ) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -611,7 +612,7 @@ async fn store(
     item: String,
     #[autocomplete = autocomplete_store] location: Option<String>,
 ) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -761,7 +762,7 @@ async fn give(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> Result<(), Error> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -891,7 +892,7 @@ async fn item_register(
     #[description = "Short ID (e.g ffmini2)"] strid: String,
     #[description = "Long descriptor of the item"] name: String,
 ) -> color_eyre::Result<()> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -913,7 +914,7 @@ async fn item_delete(
     #[autocomplete = autocomplete_item]
     item: String,
 ) -> color_eyre::Result<()> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -1052,7 +1053,7 @@ pub async fn box_info(
     #[autocomplete = autocomplete_item]
     r#box: String,
 ) -> color_eyre::Result<()> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -1120,7 +1121,7 @@ pub async fn box_add(
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
 ) -> color_eyre::Result<()> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -1213,7 +1214,7 @@ pub async fn box_rm(
     #[autocomplete = autocomplete_item]
     item4: Option<String>,
 ) -> color_eyre::Result<()> {
-    if ctx.guild_id().is_none() || !ALLOWED_GUILDS.contains(&ctx.guild_id().unwrap().get()) {
+    if ctx.guild_id().is_none() || !ctx.data().allowed_guilds.contains(&ctx.guild_id().unwrap().get()) {
         let embed = CreateEmbed::new()
             .title("Not allowed")
             .description("You are not allowed to use this command in this server.");
@@ -1288,6 +1289,16 @@ async fn main() -> color_eyre::Result<()> {
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let guilds = env::var("ALLOWED_GUILDS").expect("Allowed guilds must be set");
+
+    let parsed_guilds: Vec<u64> = guilds.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse::<u64>().unwrap_or(0))
+        .collect();
+
+    let parsed_guilds_copy = parsed_guilds.clone();
+
     // Set gateway intents, which decides what events the bot will be notified about
     let intents = GatewayIntents::non_privileged();
 
@@ -1310,16 +1321,16 @@ async fn main() -> color_eyre::Result<()> {
         .setup(|ctx, _ready, framework| {
             println!("{} is ready!", _ready.user.name);
             Box::pin(async move {
-                for guild_id in ALLOWED_GUILDS {
+                for guild_id in parsed_guilds {
                     print!("Registering in guild {}..", guild_id);
                     poise::builtins::register_in_guild(
                         ctx,
                         &framework.options().commands,
-                        GuildId::from(*guild_id),
+                        GuildId::from(guild_id),
                     )
                     .await?;
                 }
-                Ok(Data { pool })
+                Ok(Data { pool, allowed_guilds: parsed_guilds_copy })
             })
         })
         .build();
